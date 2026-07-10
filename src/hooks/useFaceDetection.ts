@@ -74,6 +74,9 @@ export function useFaceDetection() {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
       }
+      if (statsIntervalRef.current) {
+        clearInterval(statsIntervalRef.current)
+      }
       if (detectorRef.current) {
         detectorRef.current.destroy()
       }
@@ -146,6 +149,20 @@ export function useFaceDetection() {
     return detectorRef.current.getFaceDetectionLossEvents()
   }, [])
 
+  // บันทึก face mismatch event
+  const recordFaceMismatchEvent = useCallback((startTime: string, endTime: string, duration: number) => {
+    if (detectorRef.current) {
+      detectorRef.current.recordFaceMismatchEvent(startTime, endTime, duration)
+    }
+  }, [])
+
+  // ตั้งค่าโหมด mismatch
+  const setMismatchMode = useCallback((enabled: boolean) => {
+    if (detectorRef.current) {
+      detectorRef.current.setMismatchMode(enabled)
+    }
+  }, [])
+
   return {
     isActive,
     currentData,
@@ -161,6 +178,8 @@ export function useFaceDetection() {
     getOrientationHistory,
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
+    recordFaceMismatchEvent,
+    setMismatchMode,
     detector: detectorRef.current
   }
 }

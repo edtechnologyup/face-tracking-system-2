@@ -4,6 +4,7 @@ import { FaceLandmarker, FilesetResolver, NormalizedLandmark } from '@mediapipe/
 // ซ่อน TensorFlow Lite INFO messages
 const originalConsoleLog = console.log;
 const originalConsoleInfo = console.info;
+const originalConsoleError = console.error;
 
 console.log = (...args) => {
   const message = args.join(' ');
@@ -21,6 +22,24 @@ console.info = (...args) => {
     return; // ไม่แสดง TensorFlow Lite INFO messages
   }
   originalConsoleInfo.apply(console, args);
+};
+
+console.error = (...args) => {
+  const message = args.join(' ');
+  // กรอง TensorFlow Lite / MediaPipe / WebAssembly warnings และข้อผิดพลาดที่ไม่ร้ายแรง
+  // เพื่อไม่ให้ Next.js Development Server แสดง Error Overlay สีแดง
+  if (
+    message.includes('TensorFlow Lite') ||
+    message.includes('XNNPACK') ||
+    message.includes('mediapipe') ||
+    message.includes('wasm-function') ||
+    message.includes('createConsoleError')
+  ) {
+    // เปลี่ยนจาก console.error เป็น console.warn เพื่อแสดงใน Console แต่ไม่แสดงหน้าจอแดง (Error Overlay) ของ Next.js
+    console.warn('[MediaPipe Suppressed Error/Warning]:', ...args);
+    return;
+  }
+  originalConsoleError.apply(console, args);
 };
 
 export interface FaceTrackingData {
@@ -55,6 +74,7 @@ export interface OrientationEvent {
   duration?: number; // ระยะเวลาเป็นวินาที
   maxYaw?: number;   // มุม yaw สูงสุดในช่วงนั้น
   maxPitch?: number; // มุม pitch สูงสุดในช่วงนั้น
+  confidence?: number; // คะแนนความมั่นใจเฉลี่ย
   isActive: boolean; // กำลังเกิดขึ้นอยู่หรือไม่
 }
 
@@ -63,6 +83,8 @@ export interface FaceDetectionLossEvent {
   endTime?: string;  // เวลาจริงสิ้นสุด (HH:mm:ss)
   duration?: number; // ระยะเวลาเป็นวินาที
   isActive: boolean; // กำลังเกิดขึ้นอยู่หรือไม่
+  isMismatch?: boolean; // ใบหน้าไม่ตรงกับผู้สอบ
+  reason?: string; // สาเหตุ
 }
 
 // Interface สำหรับสถิติการหันหน้า
@@ -92,6 +114,8 @@ export class MediaPipeDetector {
   private orientationHistory: OrientationEvent[] = [];
   private sessionStartTime: string = '';
   private isRecording: boolean = false;
+  private currentEventConfidenceSum: number = 0;
+  private currentEventConfidenceCount: number = 0;
   
   // Face detection loss tracking
   private currentFaceDetectionLossEvent: FaceDetectionLossEvent | null = null;
@@ -99,6 +123,8 @@ export class MediaPipeDetector {
   private lastFaceDetectedTime: number = Date.now();
   private consecutiveLossFrames: number = 0;
   private readonly LOSS_THRESHOLD_FRAMES = 5; // ถือว่า loss เมื่อไม่พบ 5 frames ติด
+  private isMismatchMode: boolean = false; // โหมดตรวจพบใบหน้าไม่ตรงกับผู้สมัครสอบ
+  private lastTrackedFaceCenter: { x: number; y: number } | null = null; // จุดศูนย์กลางใบหน้าหลักที่บันทึกไว้ล่าสุด
   
   // Real-time tracking callbacks
   private onOrientationChange?: (direction: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER', yaw: number, pitch: number, confidence: number) => void;
@@ -169,6 +195,21 @@ export class MediaPipeDetector {
     }
   }
 
+  private getFaceCenter(landmarks: NormalizedLandmark[]): { x: number; y: number; area: number } {
+    let minX = 1.0, maxX = 0.0, minY = 1.0, maxY = 0.0;
+    for (const landmark of landmarks) {
+      if (landmark.x < minX) minX = landmark.x;
+      if (landmark.x > maxX) maxX = landmark.x;
+      if (landmark.y < minY) minY = landmark.y;
+      if (landmark.y > maxY) maxY = landmark.y;
+    }
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      area: (maxX - minX) * (maxY - minY)
+    };
+  }
+
   async detectFromVideo(video: HTMLVideoElement): Promise<FaceTrackingData | null> {
     if (!this.isInitialized || !this.faceLandmarker) {
       console.warn('⚠️ MediaPipe ยังไม่พร้อมใช้งาน');
@@ -176,9 +217,9 @@ export class MediaPipeDetector {
     }
 
     try {
-      // ตรวจสอบ video readiness
-      if (!video || video.readyState < 2) {
-        console.warn('⚠️ Video ยังไม่พร้อม readyState:', video?.readyState);
+      // ตรวจสอบ video readiness และขนาดของวิดีโอ (ต้อง > 0 เพื่อป้องกัน WebAssembly Crash)
+      if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+        console.warn('⚠️ Video ยังไม่พร้อม readyState:', video?.readyState, 'dimensions:', video?.videoWidth, 'x', video?.videoHeight);
         return null;
       }
 
@@ -190,8 +231,15 @@ export class MediaPipeDetector {
 
       const results = this.faceLandmarker.detectForVideo(video, performance.now());
       
-      if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
-        console.log('❌ ไม่พบใบหน้าใน MediaPipe results');
+      if (!results.faceLandmarks || results.faceLandmarks.length === 0 || this.isMismatchMode) {
+        if (this.isMismatchMode) {
+          console.log('🚨 Mismatched face detected - treating as loss');
+        } else {
+          console.log('❌ ไม่พบใบหน้าใน MediaPipe results');
+        }
+        
+        // ล้างตำแหน่งใบหน้าที่ล็อคไว้
+        this.lastTrackedFaceCenter = null;
         
         // บันทึก face detection loss
         this.handleFaceDetectionLoss();
@@ -230,15 +278,61 @@ export class MediaPipeDetector {
       // แจ้งเตือนในคอนโซลหากพบหลายใบหน้า
       if (faceCount > 1) {
         console.warn(`🚨 SECURITY ALERT: ตรวจพบ ${faceCount} ใบหน้า! อาจมีคนอื่นในการสอบ`);
-        console.warn('📍 ตำแหน่งใบหน้าทั้งหมด:', results.faceLandmarks.map((face, idx) => ({
-          face: idx + 1,
-          landmarkCount: face.length,
-          noseTip: face[1] // จุดปลายจมูก
-        })));
       }
 
-      const landmarks = results.faceLandmarks[0]; // ใช้ใบหน้าแรก (ใหญ่ที่สุด)
-      console.log('✅ พบใบหน้า! landmarks:', landmarks.length, 'จุด');
+      // เลือกใบหน้าที่จะทำการติดตาม (Proximity Target Lock เพื่อแก้ปัญหาสลับใบหน้าตรวจจับ)
+      let selectedFaceIdx = 0;
+      
+      if (faceCount > 1) {
+        const faceCenters = results.faceLandmarks.map((faceLandmarksList, idx) => {
+          const info = this.getFaceCenter(faceLandmarksList);
+          return { idx, ...info };
+        });
+
+        if (this.lastTrackedFaceCenter === null) {
+          // เริ่มติดตามใหม่: เลือกใบหน้าที่มีขนาดพื้นที่ใหญ่ที่สุด (อยู่หน้าสุดและใกล้สุด)
+          faceCenters.sort((a, b) => b.area - a.area);
+          selectedFaceIdx = faceCenters[0].idx;
+          this.lastTrackedFaceCenter = { x: faceCenters[0].x, y: faceCenters[0].y };
+          console.log(`🎯 [Face Tracker] เริ่มล็อคเป้าหมายการติดตามใบหน้าหลัก (ใบหน้าใหญ่สุด): Index ${selectedFaceIdx}`);
+        } else {
+          // กำลังติดตามอยู่: เลือกใบหน้าที่มีจุดศูนย์กลางใกล้เคียงกับใบหน้าที่ระบุล่าสุด
+          let minDistance = Infinity;
+          let bestIdx = 0;
+          
+          for (const face of faceCenters) {
+            const dx = face.x - this.lastTrackedFaceCenter.x;
+            const dy = face.y - this.lastTrackedFaceCenter.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIdx = face.idx;
+            }
+          }
+
+          // ระยะทางห่างที่ยอมรับได้ (เช่น 0.25 ของกรอบวิดีโอ) เพื่อป้องกันการสลับตัวไปแทร็กบุคคลอื่น
+          if (minDistance < 0.25) {
+            selectedFaceIdx = bestIdx;
+            const matchedFace = faceCenters.find(f => f.idx === bestIdx)!;
+            this.lastTrackedFaceCenter = { x: matchedFace.x, y: matchedFace.y };
+          } else {
+            // หากหลุดระยะห่างที่กำหนด ให้ล็อคเป้าใบหน้าที่ใหญ่ที่สุดตัวใหม่
+            faceCenters.sort((a, b) => b.area - a.area);
+            selectedFaceIdx = faceCenters[0].idx;
+            this.lastTrackedFaceCenter = { x: faceCenters[0].x, y: faceCenters[0].y };
+            console.log(`🎯 [Face Tracker] เป้าหมายหลักหลุดระยะห่าง ค้นหาและเริ่มล็อคใบหน้าใหญ่สุดใหม่: Index ${selectedFaceIdx}`);
+          }
+        }
+      } else {
+        // หากมีใบหน้าเดียวในกล้อง ให้ล็อคพิกัดของใบหน้านั้น
+        const info = this.getFaceCenter(results.faceLandmarks[0]);
+        this.lastTrackedFaceCenter = { x: info.x, y: info.y };
+        selectedFaceIdx = 0;
+      }
+
+      const landmarks = results.faceLandmarks[selectedFaceIdx];
+      console.log('✅ พบใบหน้าเป้าหมายหลัก! landmarks:', landmarks.length, 'จุด (Index:', selectedFaceIdx, ')');
       
       // บันทึกว่าพบใบหน้าแล้ว (reset loss tracking)
       this.handleFaceDetectionRecovered();
@@ -278,10 +372,30 @@ export class MediaPipeDetector {
       second: '2-digit'
     });
     
+    // คำนวณระดับความมั่นใจแบบไดนามิก (ขึ้นอยู่กับองศาการหันศีรษะและระยะห่างจากกล้อง)
+    let dynamicConfidence = 0.98;
+    
+    // ยิ่งหันมาก ความมั่นใจจะลดลงเล็กน้อยตามการบดบังของใบหน้า (Occlusion)
+    dynamicConfidence -= (Math.abs(orientation.yaw) / 90) * 0.25;
+    dynamicConfidence -= (Math.abs(orientation.pitch) / 90) * 0.15;
+    
+    // ปรับลดความมั่นใจเพิ่มเติมตามระยะห่าง (ระยะเหมาะสม 40 - 70 ซม.)
+    if (distance) {
+      const dist = distance.estimatedCm;
+      if (dist < 40) {
+        dynamicConfidence -= (40 - dist) * 0.005; // ใกล้เกินไป
+      } else if (dist > 70) {
+        dynamicConfidence -= (dist - 70) * 0.005; // ไกลเกินไป
+      }
+    }
+    
+    // จำกัดค่าความมั่นใจให้อยู่ในช่วง 0.50 - 0.98
+    const finalConfidence = Math.max(0.50, Math.min(0.98, dynamicConfidence));
+    
     return {
       isDetected: true,
       orientation,
-      confidence: 0.95, // MediaPipe มักให้ค่า confidence สูง
+      confidence: Number(finalConfidence.toFixed(3)),
       realTime,
       landmarks, // ส่ง landmarks ทั้ง 468 จุดไปให้ component
       distance
@@ -369,14 +483,20 @@ export class MediaPipeDetector {
     // กำหนดทิศทางการหันหน้า
     const direction = this.getOrientationDirection(yaw, pitch);
     
+    // คำนวณความมั่นใจของเฟรมนี้แบบไดนามิกตามมุมหัน
+    let frameConfidence = 0.98;
+    frameConfidence -= (Math.abs(yaw) / 90) * 0.25;
+    frameConfidence -= (Math.abs(pitch) / 90) * 0.15;
+    const finalFrameConfidence = Math.max(0.50, Math.min(0.98, frameConfidence));
+
     // บันทึก orientation event หากกำลัง recording
     if (this.isRecording) {
-      this.recordOrientationEvent(direction, yaw, pitch);
+      this.recordOrientationEvent(direction, yaw, pitch, finalFrameConfidence);
     }
 
     // ส่งข้อมูล real-time หาก callback ถูกตั้งค่าไว้
     if (this.onOrientationChange && direction !== this.lastSentDirection) {
-      this.onOrientationChange(direction, yaw, pitch, 0.95);
+      this.onOrientationChange(direction, yaw, pitch, Number(finalFrameConfidence.toFixed(3)));
       this.lastSentDirection = direction;
     }
 
@@ -451,7 +571,7 @@ export class MediaPipeDetector {
     return 'CENTER';
   }
   
-  private recordOrientationEvent(direction: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER', yaw: number, pitch: number): void {
+  private recordOrientationEvent(direction: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER', yaw: number, pitch: number, confidence: number): void {
     const currentTime = new Date().toLocaleTimeString('th-TH', { 
       hour12: false,
       hour: '2-digit',
@@ -466,6 +586,10 @@ export class MediaPipeDetector {
       if (this.currentOrientationEvent && this.currentOrientationEvent.isActive) {
         this.finishCurrentEvent(currentTime);
       }
+      
+      // ตั้งค่าเริ่มต้นสะสมความมั่นใจ
+      this.currentEventConfidenceSum = confidence;
+      this.currentEventConfidenceCount = 1;
       
       // เริ่ม event ใหม่
       this.currentOrientationEvent = {
@@ -482,6 +606,10 @@ export class MediaPipeDetector {
       if (this.currentOrientationEvent) {
         this.currentOrientationEvent.maxYaw = Math.max(this.currentOrientationEvent.maxYaw || 0, Math.abs(yaw));
         this.currentOrientationEvent.maxPitch = Math.max(this.currentOrientationEvent.maxPitch || 0, Math.abs(pitch));
+        
+        // สะสมความมั่นใจเพิ่มเติม
+        this.currentEventConfidenceSum += confidence;
+        this.currentEventConfidenceCount += 1;
       }
     }
   }
@@ -494,17 +622,23 @@ export class MediaPipeDetector {
     const endTimeMs = this.parseTimeString(endTime);
     const duration = Math.round((endTimeMs - startTime) / 1000); // แปลงเป็นวินาที
     
+    // คำนวณค่าความมั่นใจเฉลี่ย
+    const avgConfidence = this.currentEventConfidenceCount > 0
+      ? Number((this.currentEventConfidenceSum / this.currentEventConfidenceCount).toFixed(3))
+      : 0.95;
+
     // บันทึก event ที่สมบูรณ์
     const completedEvent: OrientationEvent = {
       ...this.currentOrientationEvent,
       endTime,
       duration,
+      confidence: avgConfidence,
       isActive: false
     };
     
     this.orientationHistory.push(completedEvent);
     
-    console.log(`✅ จบ ${completedEvent.direction} event: ${completedEvent.duration} วินาที (${completedEvent.startTime} - ${completedEvent.endTime})`);
+    console.log(`✅ จบ ${completedEvent.direction} event: ${completedEvent.duration} วินาที (${completedEvent.startTime} - ${completedEvent.endTime}) | Avg Confidence: ${avgConfidence}`);
     console.log(`   Max Yaw: ${completedEvent.maxYaw?.toFixed(1)}°, Max Pitch: ${completedEvent.maxPitch?.toFixed(1)}°`);
   }
   
@@ -676,6 +810,20 @@ export class MediaPipeDetector {
     return [...this.faceDetectionLossHistory];
   }
   
+  recordFaceMismatchEvent(startTime: string, endTime: string, duration: number): void {
+    const mismatchEvent: FaceDetectionLossEvent = {
+      startTime,
+      endTime,
+      duration,
+      isActive: false,
+      isMismatch: true,
+      reason: 'different_person'
+    };
+    
+    this.faceDetectionLossHistory.push(mismatchEvent);
+    console.log(`🚨 บันทึก Face Mismatch Event: ${startTime} → ${endTime} (${duration} วิ)`);
+  }
+
   resetFaceDetectionLossStats(): void {
     this.faceDetectionLossHistory = [];
     this.currentFaceDetectionLossEvent = null;
@@ -683,6 +831,11 @@ export class MediaPipeDetector {
     this.lastFaceDetectedTime = Date.now();
     
     console.log('🔄 Reset face detection loss statistics');
+  }
+
+  setMismatchMode(enabled: boolean): void {
+    this.isMismatchMode = enabled;
+    console.log(`🔒 MediaPipeDetector mismatch mode set to: ${enabled}`);
   }
 
   // === Real-time Tracking Methods ===

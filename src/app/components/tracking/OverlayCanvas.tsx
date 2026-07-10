@@ -33,7 +33,7 @@ export const OverlayCanvas = forwardRef<HTMLCanvasElement, OverlayCanvasProps>(
       <canvas
         ref={ref}
         className="absolute inset-0 w-full h-full"
-        style={{ pointerEvents: 'none' }}
+        style={{ pointerEvents: 'none', transform: 'scaleX(-1)' }}
       />
     )
   }

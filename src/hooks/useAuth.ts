@@ -43,8 +43,8 @@ export const useAuth = () => {
         return
       }
 
-      // ตรวจสอบความถูกต้องของ token
-      if (token !== 'verified') {
+      // ตรวจสอบความถูกต้องของ token (JWT format)
+      if (!token.includes('.')) {
         clearAuth()
         toast.error('Token ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่')
         return

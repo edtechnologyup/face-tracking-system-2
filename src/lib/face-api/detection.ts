@@ -1,11 +1,32 @@
-import * as faceapi from "face-api.js";
+// ซ่อนคำเตือนของ TensorFlow.js (TFJS) จาก Console
+if (typeof console !== 'undefined') {
+  const originalConsoleWarn = console.warn;
+  console.warn = (...args) => {
+    const msg = args.join(' ');
+    if (msg.includes('cpu backend was already registered') || 
+        msg.includes('Platform node has already been set')) {
+      return;
+    }
+    originalConsoleWarn.apply(console, args);
+  };
+}
+
+import * as faceApiImport from "face-api.js";
+
+// แก้ปัญหาการนำเข้า face-api.js ใน Next.js (รองรับทั้ง ESM และ CommonJS)
+const faceApiImportUnknown: unknown = faceApiImport;
+const faceapi: typeof faceApiImport = 
+  (faceApiImportUnknown && typeof faceApiImportUnknown === 'object' && 'default' in faceApiImportUnknown)
+    ? (faceApiImportUnknown as { default: typeof faceApiImport }).default
+    : faceApiImport;
 
 // ตัวแปรสำหรับจัดการสถานะการโหลดโมเดล
 let isModelLoaded = false;
 let isLoading = false;
 
-// URL ของโมเดลจาก CDN
-const MODEL_URL = "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
+// URL ของโมเดลจาก CDN (ตัวเลือกแรกและตัวเลือกสำรอง)
+const PRIMARY_MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
+const FALLBACK_MODEL_URL = "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
 
 /**
  * โหลดโมเดล AI สำหรับการตรวจจับใบหน้า
@@ -29,25 +50,42 @@ export async function loadFaceApiModels() {
     });
   }
 
-  try {
-    isLoading = true;
-    console.log("กำลังโหลดโมเดล face-api...");
+  isLoading = true;
+  console.log("กำลังโหลดโมเดล face-api (จาก jsDelivr CDN)...");
 
-    // โหลดโมเดลที่จำเป็นสำหรับการตรวจจับท่าและการวิเคราะห์
+  try {
+    // ลองโหลดจาก jsDelivr CDN
     await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL), // สำหรับตรวจจับการกระพริบตา
+      faceapi.nets.tinyFaceDetector.loadFromUri(PRIMARY_MODEL_URL),
+      faceapi.nets.faceLandmark68Net.loadFromUri(PRIMARY_MODEL_URL),
+      faceapi.nets.faceRecognitionNet.loadFromUri(PRIMARY_MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(PRIMARY_MODEL_URL), // สำหรับตรวจจับการกระพริบตา
     ]);
 
     isModelLoaded = true;
     isLoading = false;
-    console.log("โหลดโมเดล face-api สำเร็จ");
-    
+    console.log("โหลดโมเดล face-api สำเร็จจาก jsDelivr CDN");
+    return;
+  } catch (error) {
+    console.warn("ไม่สามารถโหลดโมเดลจาก jsDelivr CDN ได้ กำลังลองโหลดจาก GitHub Raw...", error);
+  }
+
+  try {
+    console.log("กำลังโหลดโมเดล face-api (จาก GitHub Raw)...");
+    // ลองโหลดจาก GitHub Raw เป็นตัวเลือกสำรอง
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(FALLBACK_MODEL_URL),
+      faceapi.nets.faceLandmark68Net.loadFromUri(FALLBACK_MODEL_URL),
+      faceapi.nets.faceRecognitionNet.loadFromUri(FALLBACK_MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(FALLBACK_MODEL_URL), // สำหรับตรวจจับการกระพริบตา
+    ]);
+
+    isModelLoaded = true;
+    isLoading = false;
+    console.log("โหลดโมเดล face-api สำเร็จจาก GitHub Raw");
   } catch (error) {
     isLoading = false;
-    console.error("ข้อผิดพลาดในการโหลดโมเดล face-api:", error);
+    console.error("ข้อผิดพลาดในการโหลดโมเดล face-api ทั้งสองแหล่ง:", error);
     throw new Error("ไม่สามารถโหลดโมเดล AI ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต");
   }
 }
@@ -60,7 +98,6 @@ export async function loadFaceApiModels() {
  */
 export async function detectFaceAndGetDescriptor(
   imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   skipValidation: boolean = false
 ): Promise<number[]> {
   try {
@@ -74,7 +111,7 @@ export async function detectFaceAndGetDescriptor(
     // ตั้งค่าการตรวจจับใบหน้า
     const detectionOptions = new faceapi.TinyFaceDetectorOptions({
       inputSize: 416, // ขนาดที่ใหญ่ขึ้นเพื่อความแม่นยำ
-      scoreThreshold: 0.5 // เกณฑ์สำหรับการตรวจจับ
+      scoreThreshold: 0.3 // เกณฑ์สำหรับการตรวจจับ (ปรับสอดคล้องกับ detectFacePose เพื่อรองรับการหันหน้า)
     });
 
     // ตรวจจับใบหน้าพร้อมจุดสำคัญและลายเซ็นใบหน้า
@@ -87,8 +124,8 @@ export async function detectFaceAndGetDescriptor(
       throw new Error("ไม่พบใบหน้าในภาพ กรุณาจัดตำแหน่งใบหน้าให้อยู่ในกรอบ");
     }
 
-    // ตรวจสอบความมั่นใจในการตรวจจับ
-    if (detection.detection.score < 0.5) {
+    // ตรวจสอบความมั่นใจในการตรวจจับ (ถ้าไม่ได้ระบุให้ข้าม)
+    if (!skipValidation && detection.detection.score < 0.3) {
       throw new Error("คุณภาพการตรวจจับใบหน้าไม่เพียงพอ กรุณาปรับแสงและตำแหน่ง");
     }
 
@@ -119,7 +156,7 @@ export async function detectFacePose(
   detected: boolean;
   pose: 'front' | 'left' | 'right' | 'unknown';
   confidence: number;
-  landmarks?: faceapi.FaceLandmarks68;
+  landmarks?: faceApiImport.FaceLandmarks68;
   isBlinking?: boolean;
 }> {
   try {
@@ -187,7 +224,7 @@ export async function detectFacePose(
  * @param landmarks - จุดสำคัญบนใบหน้า 68 จุด
  * @returns ท่าใบหน้าและมุมหมุน
  */
-function analyzeFacePose(landmarks: faceapi.FaceLandmarks68): {
+function analyzeFacePose(landmarks: faceApiImport.FaceLandmarks68): {
   pose: 'front' | 'left' | 'right' | 'unknown';
   yaw: number;
 } {
@@ -228,7 +265,7 @@ function analyzeFacePose(landmarks: faceapi.FaceLandmarks68): {
  * @param landmarks - จุดสำคัญบนใบหน้า 68 จุด
  * @returns true หากกำลังกระพริบตา
  */
-function detectBlinking(landmarks: faceapi.FaceLandmarks68): boolean {
+function detectBlinking(landmarks: faceApiImport.FaceLandmarks68): boolean {
   const positions = landmarks.positions;
   
   // จุด landmarks ของตาซ้าย (36-41)

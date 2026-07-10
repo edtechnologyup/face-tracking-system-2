@@ -1,4 +1,25 @@
-import * as faceapi from "face-api.js";
+// ซ่อนคำเตือนของ TensorFlow.js (TFJS) จาก Console
+if (typeof console !== 'undefined') {
+  const originalConsoleWarn = console.warn;
+  console.warn = (...args) => {
+    const msg = args.join(' ');
+    if (msg.includes('cpu backend was already registered') || 
+        msg.includes('Platform node has already been set')) {
+      return;
+    }
+    originalConsoleWarn.apply(console, args);
+  };
+}
+
+import * as faceApiImport from "face-api.js";
+
+// แก้ปัญหาการนำเข้า face-api.js ใน Next.js (รองรับทั้ง ESM และ CommonJS)
+const faceApiImportUnknown: unknown = faceApiImport;
+const faceapi: typeof faceApiImport = 
+  (faceApiImportUnknown && typeof faceApiImportUnknown === 'object' && 'default' in faceApiImportUnknown)
+    ? (faceApiImportUnknown as { default: typeof faceApiImport }).default
+    : faceApiImport;
+
 
 /**
  * เปรียบเทียบ face descriptors และคำนวณระยะห่าง

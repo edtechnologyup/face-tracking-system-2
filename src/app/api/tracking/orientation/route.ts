@@ -10,6 +10,7 @@ interface OrientationEvent {
   duration?: number;
   maxYaw?: number;
   maxPitch?: number;
+  confidence?: number;
   isActive: boolean;
 }
 
@@ -35,6 +36,8 @@ interface OrientationLogRequest {
     endTime?: string;
     duration?: number;
     isActive: boolean;
+    isMismatch?: boolean;
+    reason?: string;
   }>;
 }
 
@@ -87,7 +90,7 @@ export async function POST(request: NextRequest) {
               maxYaw: event.maxYaw,
               maxPitch: event.maxPitch
             },
-            confidence: 0.95 // MediaPipe มี confidence สูง
+            confidence: typeof event.confidence === 'number' ? event.confidence : 0.95
           }
         })
       })
@@ -105,7 +108,9 @@ export async function POST(request: NextRequest) {
               detectionData: {
                 startTime: event.startTime,
                 endTime: event.endTime,
-                duration: event.duration
+                duration: event.duration,
+                isMismatch: event.isMismatch || false,
+                reason: event.reason || undefined
               },
               confidence: 1.0 // การไม่พบใบหน้าเป็นข้อมูลที่แน่นอน
             }

@@ -1,4 +1,4 @@
-import * as faceapi from "face-api.js";
+import type * as faceapi from "face-api.js";
 
 /**
  * ฟังก์ชันพื้นฐานสำหรับตรวจสอบการเคลื่อนไหวของใบหน้า

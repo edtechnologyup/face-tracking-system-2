@@ -271,7 +271,7 @@ export default function AdminDashboard() {
 
         {/* Users Page */}
         {currentPage === 'users' && (
-          <UsersTable users={users} />
+          <UsersTable users={users} onRefresh={fetchDashboardData} />
         )}
 
         {/* Sessions Page - List View */}
@@ -279,6 +279,7 @@ export default function AdminDashboard() {
           <SessionsList 
             sessions={sessions}
             onSessionClick={handleSessionClick}
+            onRefresh={fetchDashboardData}
           />
         )}
 

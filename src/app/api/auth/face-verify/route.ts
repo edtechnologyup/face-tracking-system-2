@@ -102,8 +102,8 @@ export async function POST(request: NextRequest) {
     }
     
     // เกณฑ์การจับคู่ใบหน้า - ใช้การจับคู่ที่ดีที่สุด
-    // ปรับ threshold ให้เข้มงวดขึ้นเพื่อความปลอดภัย
-    const threshold = 0.4
+    // ปรับ threshold ให้สมดุลขึ้นระหว่างความปลอดภัยและความสะดวกของผู้ใช้ (แนะนำที่ 0.5 สำหรับ Single-pose)
+    const threshold = 0.5
     
     // เพิ่มการตรวจสอบเพิ่มเติม - ต้องมีการตรงกับหลายท่า
     const validMatches = distances.filter(d => d.distance < threshold)
