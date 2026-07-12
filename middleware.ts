@@ -1,8 +1,52 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import jwt from 'jsonwebtoken'
 
-export function middleware(request: NextRequest) {
+// Edge-safe JWT verification using Web Crypto API
+async function verifyJWT(token: string, secret: string): Promise<{ userId: string; role: string } | null> {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, signatureB64] = parts;
+    
+    // Decode payload safely
+    const payloadStr = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'));
+    const payload = JSON.parse(payloadStr);
+
+    // Verify signature
+    const encoder = new TextEncoder();
+    const data = encoder.encode(`${headerB64}.${payloadB64}`);
+    const keyData = encoder.encode(secret);
+
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      keyData,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
+
+    // Decode signature from base64url
+    const signatureBin = Uint8Array.from(
+      atob(signatureB64.replace(/-/g, '+').replace(/_/g, '/')),
+      c => c.charCodeAt(0)
+    );
+
+    const isValid = await crypto.subtle.verify(
+      'HMAC',
+      cryptoKey,
+      signatureBin,
+      data
+    );
+
+    return isValid ? payload : null;
+  } catch (err) {
+    console.error('JWT verification error in Edge:', err);
+    return null;
+  }
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   
   // Protected routes
@@ -36,7 +80,12 @@ export function middleware(request: NextRequest) {
     
     if (tokenToVerify) {
       try {
-        const decoded = jwt.verify(tokenToVerify, process.env.JWT_SECRET || 'fallback-secret') as { userId: string; role: string }
+        const decoded = await verifyJWT(tokenToVerify, process.env.JWT_SECRET || 'fallback-secret')
+        
+        if (!decoded) {
+          // Token ไม่ถูกต้องให้ redirect ไปหน้า login
+          return NextResponse.redirect(new URL('/login', request.url))
+        }
         
         // ตรวจสอบ admin routes - เฉพาะ ADMIN เท่านั้น
         if (isAdminRoute && decoded.role !== 'ADMIN') {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import jwt from 'jsonwebtoken'
 
 // ฟังก์ชันคำนวณ Euclidean distance (server-side)
 function euclideanDistance(arr1: number[], arr2: number[]): number {
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
   try {
     console.log('=== Face Verify API Called ===')
     
-    const { userId, faceData, verifiedPoses, singlePoseVerification } = await request.json()
+    const { userId, faceData, verifiedPoses, singlePoseVerification, forPasswordReset } = await request.json()
 
     // ตรวจสอบข้อมูลที่รับเข้ามา
     if (!userId || !faceData) {
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     // ดึงข้อมูลใบหน้าที่บันทึกไว้
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { faceData: true, firstName: true, lastName: true }
+      select: { id: true, faceData: true, firstName: true, lastName: true, email: true }
     })
 
     if (!user) {
@@ -102,8 +103,8 @@ export async function POST(request: NextRequest) {
     }
     
     // เกณฑ์การจับคู่ใบหน้า - ใช้การจับคู่ที่ดีที่สุด
-    // ปรับ threshold ให้สมดุลขึ้นระหว่างความปลอดภัยและความสะดวกของผู้ใช้ (แนะนำที่ 0.5 สำหรับ Single-pose)
-    const threshold = 0.5
+    // ปรับ threshold ให้สมดุลขึ้นระหว่างความปลอดภัยและความสะดวกของผู้ใช้ (แนะนำที่ 0.4 สำหรับ Single-pose เพื่อความปลอดภัยสูงสุด)
+    const threshold = 0.4
     
     // เพิ่มการตรวจสอบเพิ่มเติม - ต้องมีการตรงกับหลายท่า
     const validMatches = distances.filter(d => d.distance < threshold)
@@ -153,12 +154,26 @@ export async function POST(request: NextRequest) {
       security: singlePoseVerification ? 'Single-pose verification with stricter threshold' : 'Enhanced verification with 3-pose confirmation and stricter threshold'
     })
 
+    let resetToken: string | undefined = undefined
+    if (isMatch && forPasswordReset) {
+      resetToken = jwt.sign(
+        { 
+          userId: user.id, 
+          email: user.email, 
+          purpose: 'password-reset' 
+        },
+        process.env.JWT_SECRET || 'fallback-secret',
+        { expiresIn: '15m' } // 15 mins for security
+      )
+    }
+
     return NextResponse.json({
       isMatch,
       distance: minDistance,
       bestMatch,
       allDistances: distances,
       threshold,
+      resetToken,
       message: isMatch 
         ? `ยืนยันตัวตนสำเร็จ (ตรงกับท่า ${bestMatch}${verifiedPoses ? (singlePoseVerification ? ' + ยืนยันท่าเดียว' : ' + ยืนยัน 3 ท่าครบถ้วน') : ''})` 
         : !poseVerificationPassed 

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'react-hot-toast'
 
 interface User {
@@ -25,11 +25,19 @@ export const useAuth = () => {
     isAuthenticated: false
   })
 
-  useEffect(() => {
-    checkAuthStatus()
+  const clearAuth = useCallback(() => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    localStorage.removeItem('tempUser')
+    localStorage.removeItem('tempUserId')
+    setAuthState({
+      user: null,
+      isLoading: false,
+      isAuthenticated: false
+    })
   }, [])
 
-  const checkAuthStatus = () => {
+  const checkAuthStatus = useCallback(() => {
     try {
       const token = localStorage.getItem('token')
       const userData = localStorage.getItem('user')
@@ -69,19 +77,11 @@ export const useAuth = () => {
       clearAuth()
       toast.error('เกิดข้อผิดพลาดในการตรวจสอบการเข้าสู่ระบบ')
     }
-  }
+  }, [clearAuth])
 
-  const clearAuth = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
-    localStorage.removeItem('tempUser')
-    localStorage.removeItem('tempUserId')
-    setAuthState({
-      user: null,
-      isLoading: false,
-      isAuthenticated: false
-    })
-  }
+  useEffect(() => {
+    checkAuthStatus()
+  }, [checkAuthStatus])
 
   const logout = () => {
     clearAuth()

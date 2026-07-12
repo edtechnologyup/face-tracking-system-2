@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { Button } from "@/app/components/ui/Button";
 import { Card } from "@/app/components/ui/Card";
 import { loadFaceApiModels, detectFaceAndGetDescriptor, detectFacePose, isPoseReady } from "@/lib/face-api";
@@ -55,60 +55,7 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
   
   const currentPose = poses[currentPoseIndex];
 
-  useEffect(() => {
-    initializeFaceApi();
-    return () => {
-      stopCamera();
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
-      }
-    };
-  }, []);
-  
-  // เริ่มการตรวจจับท่าอย่างต่อเนื่องเมื่อสตรีมมิ่ง
-  useEffect(() => {
-    if (isStreaming && !isModelLoading && !isAllPosesComplete) {
-      startContinuousDetection();
-    } else {
-      stopContinuousDetection();
-    }
-    
-    return () => stopContinuousDetection();
-  }, [isStreaming, isModelLoading, isAllPosesComplete]);
-  
-  // จับภาพอัตโนมัติเมื่อท่าคงที่
-  useEffect(() => {
-    if (!autoCapturing && !isCapturingPose && !isAllPosesComplete) {
-      const targetPose = currentPose.type;
-      const isReady = isPoseReady(currentDetectedPose, targetPose, poseConfidence, isBlinking);
-      
-      if (isReady) {
-        setPoseStableCount(prev => prev + 1);
-        
-        // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) จับภาพอัตโนมัติ
-        if (poseStableCount >= 10) {
-          handleAutoCapture();
-        }
-      } else {
-        setPoseStableCount(0);
-      }
-    }
-  }, [currentDetectedPose, poseConfidence, isBlinking, poseStableCount, autoCapturing, isCapturingPose, isAllPosesComplete]);
-
-  const initializeFaceApi = async () => {
-    try {
-      setIsModelLoading(true);
-      await loadFaceApiModels();
-      await startCamera();
-    } catch (err) {
-      setError("ไม่สามารถโหลดโมเดล AI ได้ กรุณาลองใหม่อีกครั้ง");
-      console.error("ข้อผิดพลาดในการเริ่มต้น Face API:", err);
-    } finally {
-      setIsModelLoading(false);
-    }
-  };
-
-  const startCamera = async () => {
+  const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -153,17 +100,40 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
         setError('ไม่สามารถเข้าถึงกล้องได้ กรุณาลองใหม่อีกครั้ง')
       }
     }
-  }
+  }, []);
 
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (videoRef.current?.srcObject) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach((track) => track.stop());
       setIsStreaming(false);
     }
-  };
+  }, []);
 
-  const startContinuousDetection = () => {
+  const initializeFaceApi = useCallback(async () => {
+    try {
+      setIsModelLoading(true);
+      await loadFaceApiModels();
+      await startCamera();
+    } catch (err) {
+      setError("ไม่สามารถโหลดโมเดล AI ได้ กรุณาลองใหม่อีกครั้ง");
+      console.error("ข้อผิดพลาดในการเริ่มต้น Face API:", err);
+    } finally {
+      setIsModelLoading(false);
+    }
+  }, [startCamera]);
+
+  useEffect(() => {
+    initializeFaceApi();
+    return () => {
+      stopCamera();
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+      }
+    };
+  }, [initializeFaceApi, stopCamera]);
+  
+  const startContinuousDetection = useCallback(() => {
     if (detectionIntervalRef.current) return;
     
     detectionIntervalRef.current = setInterval(async () => {
@@ -186,16 +156,27 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
         }
       }
     }, 100);
-  };
+  }, [isCapturingPose, autoCapturing]);
   
-  const stopContinuousDetection = () => {
+  const stopContinuousDetection = useCallback(() => {
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current);
       detectionIntervalRef.current = null;
     }
-  };
+  }, []);
+
+  // เริ่มการตรวจจับท่าอย่างต่อเนื่องเมื่อสตรีมมิ่ง
+  useEffect(() => {
+    if (isStreaming && !isModelLoading && !isAllPosesComplete) {
+      startContinuousDetection();
+    } else {
+      stopContinuousDetection();
+    }
+    
+    return () => stopContinuousDetection();
+  }, [isStreaming, isModelLoading, isAllPosesComplete, startContinuousDetection, stopContinuousDetection]);
   
-  const playSuccessSound = () => {
+  const playSuccessSound = useCallback(() => {
     try {
       // สร้างเสียงเชิงบวกด้วย Web Audio API
       const audioContext = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || AudioContext)();
@@ -221,9 +202,9 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
     } catch {
       console.log('ระบบเสียงไม่ได้รับการสนับสนุนหรือถูกบล็อก');
     }
-  };
+  }, [currentPoseIndex]);
 
-  const playCompletionSound = () => {
+  const playCompletionSound = useCallback(() => {
     try {
       // เสียงสำหรับเสร็จสิ้นทั้งหมด (แบบมีท่วงทำนอง)
       const audioContext = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || AudioContext)();
@@ -250,9 +231,9 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
     } catch {
       console.log('ระบบเสียงไม่ได้รับการสนับสนุนหรือถูกบล็อก');
     }
-  };
+  }, []);
 
-  const handleAutoCapture = async () => {
+  const handleAutoCapture = useCallback(async () => {
     if (!videoRef.current || isCapturingPose || autoCapturing) return;
 
     try {
@@ -294,7 +275,26 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
       setIsCapturingPose(false);
       setAutoCapturing(false);
     }
-  };
+  }, [isCapturingPose, autoCapturing, capturedPoses, currentPose.type, currentPoseIndex, poses.length, onCapture, playSuccessSound, playCompletionSound]);
+
+  // จับภาพอัตโนมัติเมื่อท่าคงที่
+  useEffect(() => {
+    if (!autoCapturing && !isCapturingPose && !isAllPosesComplete) {
+      const targetPose = currentPose.type;
+      const isReady = isPoseReady(currentDetectedPose, targetPose, poseConfidence, isBlinking);
+      
+      if (isReady) {
+        setPoseStableCount(prev => prev + 1);
+        
+        // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) จับภาพอัตโนมัติ
+        if (poseStableCount >= 10) {
+          handleAutoCapture();
+        }
+      } else {
+        setPoseStableCount(0);
+      }
+    }
+  }, [currentDetectedPose, poseConfidence, isBlinking, poseStableCount, autoCapturing, isCapturingPose, isAllPosesComplete, currentPose.type, handleAutoCapture]);
 
   const handleRetake = () => {
     setCurrentPoseIndex(0);

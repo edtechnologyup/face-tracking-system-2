@@ -123,7 +123,6 @@ export class MediaPipeDetector {
   private lastFaceDetectedTime: number = Date.now();
   private consecutiveLossFrames: number = 0;
   private readonly LOSS_THRESHOLD_FRAMES = 5; // ถือว่า loss เมื่อไม่พบ 5 frames ติด
-  private isMismatchMode: boolean = false; // โหมดตรวจพบใบหน้าไม่ตรงกับผู้สมัครสอบ
   private lastTrackedFaceCenter: { x: number; y: number } | null = null; // จุดศูนย์กลางใบหน้าหลักที่บันทึกไว้ล่าสุด
   
   // Real-time tracking callbacks
@@ -231,12 +230,8 @@ export class MediaPipeDetector {
 
       const results = this.faceLandmarker.detectForVideo(video, performance.now());
       
-      if (!results.faceLandmarks || results.faceLandmarks.length === 0 || this.isMismatchMode) {
-        if (this.isMismatchMode) {
-          console.log('🚨 Mismatched face detected - treating as loss');
-        } else {
-          console.log('❌ ไม่พบใบหน้าใน MediaPipe results');
-        }
+      if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
+        console.log('❌ ไม่พบใบหน้าใน MediaPipe results');
         
         // ล้างตำแหน่งใบหน้าที่ล็อคไว้
         this.lastTrackedFaceCenter = null;
@@ -833,10 +828,7 @@ export class MediaPipeDetector {
     console.log('🔄 Reset face detection loss statistics');
   }
 
-  setMismatchMode(enabled: boolean): void {
-    this.isMismatchMode = enabled;
-    console.log(`🔒 MediaPipeDetector mismatch mode set to: ${enabled}`);
-  }
+
 
   // === Real-time Tracking Methods ===
   

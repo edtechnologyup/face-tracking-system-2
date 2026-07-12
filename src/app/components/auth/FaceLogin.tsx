@@ -1,5 +1,5 @@
 'use client'
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import { Card } from '@/app/components/ui/Card'
 import { loadFaceApiModels, detectFacePose, isPoseReadyForLogin, detectFaceAndGetDescriptor } from '@/lib/face-api'
 import { VideoDisplay } from './face-login/VideoDisplay'
@@ -29,7 +29,6 @@ const POSE_STABLE_COUNT_THRESHOLD = 10
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const DETECTION_INTERVAL = 100
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const AVAILABLE_POSES: PoseData[] = [
   { type: 'front', title: 'หน้าตรง', instruction: 'มองตรงเข้ากล้อง', icon: '🧑' },
   { type: 'left', title: 'หันซ้าย', instruction: 'หันหน้าไปทางซ้าย 30 องศา', icon: '👈' },
@@ -66,118 +65,12 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
   const [poseTimeRemaining, setPoseTimeRemaining] = useState(POSE_TIMEOUT_SECONDS)
   const [isTimeoutWarning, setIsTimeoutWarning] = useState(false)
   
-  const availablePoses: PoseData[] = [
-    { type: 'front', title: 'หน้าตรง', instruction: 'มองตรงเข้ากล้อง', icon: '🧑' },
-    { type: 'left', title: 'หันซ้าย', instruction: 'หันหน้าไปทางซ้าย 30 องศา', icon: '👈' },
-    { type: 'right', title: 'หันขวา', instruction: 'หันหน้าไปทางขวา 30 องศา', icon: '👉' }
-  ]
-  
-  const currentPose = availablePoses.find(p => p.type === selectedPose)
+  const currentPose = AVAILABLE_POSES.find(p => p.type === selectedPose)
 
-  useEffect(() => {
-    if (isOpen) {
-      // สุ่มเลือกท่าเมื่อเปิด modal
-      const randomIndex = Math.floor(Math.random() * availablePoses.length)
-      setSelectedPose(availablePoses[randomIndex].type)
-      initializeFaceApi()
-    } else {
-      stopCamera()
-      // รีเซ็ตสถานะเมื่อปิด modal
-      setSelectedPose(null)
-      setIsPoseVerified(false)
-      setPoseProgress(0)
-    }
-    
-    return () => {
-      stopCamera()
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current)
-      }
-      if (poseTimeoutRef.current) {
-        clearTimeout(poseTimeoutRef.current)
-      }
-    }
-  }, [isOpen])
+  // Forward ref for circular callback dependency resolution
+  const handleRestartRef = useRef<() => void>(null)
 
-  // เริ่มการตรวจจับท่าอย่างต่อเนื่องเมื่อสตรีมมิ่ง
-  useEffect(() => {
-    if (isStreaming && !isModelLoading && !isPoseVerified && selectedPose) {
-      startContinuousDetection()
-    } else {
-      stopContinuousDetection()
-    }
-    
-    return () => stopContinuousDetection()
-  }, [isStreaming, isModelLoading, isPoseVerified, selectedPose])
-  
-  // ยืนยันอัตโนมัติเมื่อท่าคงที่
-  useEffect(() => {
-    if (!autoVerifying && !isVerifyingPose && !isPoseVerified && selectedPose) {
-      const isReady = isPoseReadyForLogin(currentDetectedPose, selectedPose, poseConfidence)
-      
-      if (isReady) {
-        setPoseStableCount((prev: number) => prev + 1)
-        
-        // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) ยืนยันอัตโนมัติ
-        if (poseStableCount >= 10) {
-          handleAutoVerify()
-        }
-      } else {
-        setPoseStableCount(0)
-      }
-    }
-  }, [currentDetectedPose, poseConfidence, poseStableCount, autoVerifying, isVerifyingPose, isPoseVerified, selectedPose])
-  
-  // ตั้งเวลาสำหรับท่าเดียว (10 วินาที)
-  useEffect(() => {
-    if (!isPoseVerified && !isVerifyingPose && isStreaming && !isModelLoading && selectedPose) {
-      startPoseTimeout()
-    }
-    
-    return () => {
-      if (poseTimeoutRef.current) {
-        clearTimeout(poseTimeoutRef.current)
-      }
-    }
-  }, [isPoseVerified, isVerifyingPose, isStreaming, isModelLoading, selectedPose])
-  
-  // อัพเดตเวลาที่เหลือทุกวินาที
-  useEffect(() => {
-    if (poseTimeRemaining > 0 && !isPoseVerified && !isVerifyingPose && isStreaming && !isModelLoading && selectedPose) {
-      const interval = setInterval(() => {
-        setPoseTimeRemaining((prev: number) => {
-          if (prev <= 1 && prev > 0) {
-            setIsTimeoutWarning(true)
-          }
-          return prev - 1
-        })
-      }, 1000)
-      
-      return () => clearInterval(interval)
-    }
-  }, [poseTimeRemaining, isPoseVerified, isVerifyingPose, isStreaming, isModelLoading, selectedPose])
-  
-  // ตรวจสอบหมดเวลา
-  useEffect(() => {
-    if (poseTimeRemaining <= 0 && !isPoseVerified && !isVerifyingPose) {
-      handlePoseTimeout()
-    }
-  }, [poseTimeRemaining, isPoseVerified, isVerifyingPose])
-
-  const initializeFaceApi = async () => {
-    try {
-      setIsModelLoading(true)
-      await loadFaceApiModels()
-      await startCamera()
-    } catch (err) {
-      setError('ไม่สามารถโหลดโมเดล AI ได้')
-      console.error('ข้อผิดพลาดในการเริ่มต้น Face API:', err)
-    } finally {
-      setIsModelLoading(false)
-    }
-  }
-
-  const startCamera = async () => {
+  const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -222,17 +115,55 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
         setError('ไม่สามารถเข้าถึงกล้องได้ กรุณาลองใหม่อีกครั้ง')
       }
     }
-  }
+  }, [])
 
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (videoRef.current?.srcObject) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
       tracks.forEach(track => track.stop())
       setIsStreaming(false)
     }
-  }
+  }, [])
 
-  const startContinuousDetection = () => {
+  const initializeFaceApi = useCallback(async () => {
+    try {
+      setIsModelLoading(true)
+      await loadFaceApiModels()
+      await startCamera()
+    } catch (err) {
+      setError('ไม่สามารถโหลดโมเดล AI ได้')
+      console.error('ข้อผิดพลาดในการเริ่มต้น Face API:', err)
+    } finally {
+      setIsModelLoading(false)
+    }
+  }, [startCamera])
+
+  useEffect(() => {
+    if (isOpen) {
+      // สุ่มเลือกท่าเมื่อเปิด modal
+      const randomIndex = Math.floor(Math.random() * AVAILABLE_POSES.length)
+      setSelectedPose(AVAILABLE_POSES[randomIndex].type)
+      initializeFaceApi()
+    } else {
+      stopCamera()
+      // รีเซ็ตสถานะเมื่อปิด modal
+      setSelectedPose(null)
+      setIsPoseVerified(false)
+      setPoseProgress(0)
+    }
+    
+    return () => {
+      stopCamera()
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current)
+      }
+      if (poseTimeoutRef.current) {
+        clearTimeout(poseTimeoutRef.current)
+      }
+    }
+  }, [isOpen, initializeFaceApi, stopCamera])
+
+  const startContinuousDetection = useCallback(() => {
     if (detectionIntervalRef.current) return
     
     detectionIntervalRef.current = setInterval(async () => {
@@ -255,16 +186,27 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
         }
       }
     }, 100)
-  }
+  }, [isVerifyingPose, autoVerifying])
   
-  const stopContinuousDetection = () => {
+  const stopContinuousDetection = useCallback(() => {
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current)
       detectionIntervalRef.current = null
     }
-  }
+  }, [])
 
-  const playSuccessSound = () => {
+  // เริ่มการตรวจจับท่าอย่างต่อเนื่องเมื่อสตรีมมิ่ง
+  useEffect(() => {
+    if (isStreaming && !isModelLoading && !isPoseVerified && selectedPose) {
+      startContinuousDetection()
+    } else {
+      stopContinuousDetection()
+    }
+    
+    return () => stopContinuousDetection()
+  }, [isStreaming, isModelLoading, isPoseVerified, selectedPose, startContinuousDetection, stopContinuousDetection])
+  
+  const playSuccessSound = useCallback(() => {
     try {
       // สร้างเสียงเชิงบวกด้วย Web Audio API
       const audioContext = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || AudioContext)()
@@ -289,9 +231,9 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
     } catch {
       console.log('ระบบเสียงไม่ได้รับการสนับสนุนหรือถูกบล็อก')
     }
-  }
+  }, [])
 
-  const playCompletionSound = () => {
+  const playCompletionSound = useCallback(() => {
     try {
       // ท่วงทำนอง C5, E5, G5, C6
       const audioContext = new (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || AudioContext)()
@@ -318,9 +260,15 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
     } catch {
       console.log('ระบบเสียงไม่ได้รับการสนับสนุนหรือถูกบล็อก')
     }
-  }
-  
-  const startPoseTimeout = () => {
+  }, [])
+
+  const handlePoseTimeout = useCallback(() => {
+    setError(`หมดเวลาสำหรับท่า${currentPose?.title} กรุณาเริ่มต้นใหม่`)
+    // สุ่มเลือกท่าใหม่
+    handleRestartRef.current?.()
+  }, [currentPose])
+
+  const startPoseTimeout = useCallback(() => {
     // ล้างตัวจับเวลาเก่า
     if (poseTimeoutRef.current) {
       clearTimeout(poseTimeoutRef.current)
@@ -334,16 +282,49 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
     poseTimeoutRef.current = setTimeout(() => {
       handlePoseTimeout()
     }, 10000) // 10 วินาที = 10,000 มิลลิวินาที
-  }
-  
-  const handlePoseTimeout = () => {
-    setError(`หมดเวลาสำหรับท่า${currentPose?.title} กรุณาเริ่มต้นใหม่`)
-    // สุ่มเลือกท่าใหม่
-    handleRestart()
-  }
-  
+  }, [handlePoseTimeout])
 
-  const handleAutoVerify = async () => {
+  const handleFinalVerification = useCallback(async () => {
+    if (!videoRef.current || !selectedPose) return
+
+    setLoading(true)
+    setError('')
+
+    try {
+      // ตรวจจับใบหน้าครั้งสุดท้าย
+      const faceDescriptor = await detectFaceAndGetDescriptor(videoRef.current)
+      
+      // ส่งไปยืนยันกับเซิร์ฟเวอร์
+      const response = await fetch('/api/auth/face-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          faceData: faceDescriptor,
+          verifiedPoses: { [selectedPose]: true }, // ส่งท่าเดียวที่ยืนยันแล้ว
+          singlePoseVerification: true // บอก API ว่าเป็นการยืนยันท่าเดียว
+        })
+      })
+
+      const result = await response.json()
+
+      if (response.ok && result.isMatch) {
+        onSuccess()
+      } else {
+        setError(result.message || 'ใบหน้าไม่ตรงกับข้อมูลที่ลงทะเบียน')
+        // รีเซ็ตการยืนยัน
+        handleRestartRef.current?.()
+      }
+
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการตรวจสอบ')
+      handleRestartRef.current?.()
+    } finally {
+      setLoading(false)
+    }
+  }, [userId, selectedPose, onSuccess])
+
+  const handleAutoVerify = useCallback(async () => {
     if (!videoRef.current || isVerifyingPose || autoVerifying || !selectedPose) return
 
     try {
@@ -378,52 +359,12 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
       setIsVerifyingPose(false)
       setAutoVerifying(false)
     }
-  }
+  }, [isVerifyingPose, autoVerifying, selectedPose, playSuccessSound, playCompletionSound, handleFinalVerification])
 
-  const handleFinalVerification = async () => {
-    if (!videoRef.current || !selectedPose) return
-
-    setLoading(true)
-    setError('')
-
-    try {
-      // ตรวจจับใบหน้าครั้งสุดท้าย
-      const faceDescriptor = await detectFaceAndGetDescriptor(videoRef.current)
-      
-      // ส่งไปยืนยันกับเซิร์ฟเวอร์
-      const response = await fetch('/api/auth/face-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          faceData: faceDescriptor,
-          verifiedPoses: { [selectedPose]: true }, // ส่งท่าเดียวที่ยืนยันแล้ว
-          singlePoseVerification: true // บอก API ว่าเป็นการยืนยันท่าเดียว
-        })
-      })
-
-      const result = await response.json()
-
-      if (response.ok && result.isMatch) {
-        onSuccess()
-      } else {
-        setError(result.message || 'ใบหน้าไม่ตรงกับข้อมูลที่ลงทะเบียน')
-        // รีเซ็ตการยืนยัน
-        handleRestart()
-      }
-
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการตรวจสอบ')
-      handleRestart()
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleRestart = () => {
+  const handleRestart = useCallback(() => {
     // สุ่มเลือกท่าใหม่
-    const randomIndex = Math.floor(Math.random() * availablePoses.length)
-    setSelectedPose(availablePoses[randomIndex].type)
+    const randomIndex = Math.floor(Math.random() * AVAILABLE_POSES.length)
+    setSelectedPose(AVAILABLE_POSES[randomIndex].type)
     
     setPoseProgress(0)
     setIsPoseVerified(false)
@@ -444,7 +385,63 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
     if (isStreaming && !isModelLoading) {
       startPoseTimeout()
     }
-  }
+  }, [isStreaming, isModelLoading, startPoseTimeout])
+
+  handleRestartRef.current = handleRestart
+
+  // ยืนยันอัตโนมัติเมื่อท่าคงที่
+  useEffect(() => {
+    if (!autoVerifying && !isVerifyingPose && !isPoseVerified && selectedPose) {
+      const isReady = isPoseReadyForLogin(currentDetectedPose, selectedPose, poseConfidence)
+      
+      if (isReady) {
+        setPoseStableCount((prev: number) => prev + 1)
+        
+        // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) ยืนยันอัตโนมัติ
+        if (poseStableCount >= 10) {
+          handleAutoVerify()
+        }
+      } else {
+        setPoseStableCount(0)
+      }
+    }
+  }, [currentDetectedPose, poseConfidence, poseStableCount, autoVerifying, isVerifyingPose, isPoseVerified, selectedPose, handleAutoVerify])
+  
+  // ตั้งเวลาสำหรับท่าเดียว (10 วินาที)
+  useEffect(() => {
+    if (!isPoseVerified && !isVerifyingPose && isStreaming && !isModelLoading && selectedPose) {
+      startPoseTimeout()
+    }
+    
+    return () => {
+      if (poseTimeoutRef.current) {
+        clearTimeout(poseTimeoutRef.current)
+      }
+    }
+  }, [isPoseVerified, isVerifyingPose, isStreaming, isModelLoading, selectedPose, startPoseTimeout])
+  
+  // อัพเดตเวลาที่เหลือทุกวินาที
+  useEffect(() => {
+    if (poseTimeRemaining > 0 && !isPoseVerified && !isVerifyingPose && isStreaming && !isModelLoading && selectedPose) {
+      const interval = setInterval(() => {
+        setPoseTimeRemaining((prev: number) => {
+          if (prev <= 1 && prev > 0) {
+            setIsTimeoutWarning(true)
+          }
+          return prev - 1
+        })
+      }, 1000)
+      
+      return () => clearInterval(interval)
+    }
+  }, [poseTimeRemaining, isPoseVerified, isVerifyingPose, isStreaming, isModelLoading, selectedPose])
+  
+  // ตรวจสอบหมดเวลา
+  useEffect(() => {
+    if (poseTimeRemaining <= 0 && !isPoseVerified && !isVerifyingPose) {
+      handlePoseTimeout()
+    }
+  }, [poseTimeRemaining, isPoseVerified, isVerifyingPose, handlePoseTimeout])
 
   if (!isOpen) return null
 

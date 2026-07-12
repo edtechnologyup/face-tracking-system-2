@@ -70,8 +70,6 @@ export const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
           )}
         </div>
 
-        {/* Hidden Canvas for capture */}
-        <canvas className="hidden" />
       </div>
     );
   }

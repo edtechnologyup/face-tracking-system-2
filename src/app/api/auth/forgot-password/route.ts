@@ -1,82 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import jwt from 'jsonwebtoken';
 import { validateEmail } from '@/lib/utils/validation';
-import { sendResetPasswordEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email } = await request.json();
+    const { identifier } = await request.json();
 
-    if (!email) {
+    if (!identifier) {
       return NextResponse.json(
-        { error: 'กรุณากรอกอีเมล' },
+        { error: 'กรุณากรอกอีเมลหรือรหัสนิสิต' },
         { status: 400 }
       );
     }
 
-    // ตรวจสอบรูปแบบอีเมลและปรับปรุงให้อยู่ในรูปแบบที่ถูกต้อง
-    const emailValidation = validateEmail(email);
-    if (!emailValidation.isValid) {
-      return NextResponse.json(
-        { error: emailValidation.error },
-        { status: 400 }
-      );
+    const isEmail = identifier.includes('@');
+    let user = null;
+
+    if (isEmail) {
+      const emailValidation = validateEmail(identifier);
+      if (!emailValidation.isValid) {
+        return NextResponse.json(
+          { error: emailValidation.error },
+          { status: 400 }
+        );
+      }
+      user = await prisma.user.findUnique({
+        where: { email: emailValidation.normalizedEmail }
+      });
+    } else {
+      // ค้นหาด้วยรหัสนิสิต (studentId)
+      const cleanedStudentId = identifier.trim();
+      user = await prisma.user.findFirst({
+        where: { studentId: cleanedStudentId }
+      });
     }
 
-    const normalizedEmail = emailValidation.normalizedEmail!;
-
-    // ค้นหาผู้ใช้จากอีเมลในระบบ
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail }
-    });
-
-    // หากไม่พบผู้ใช้ในระบบ เพื่อความปลอดภัยป้องกันไม่ให้แฮกเกอร์ตรวจพบอีเมลจริง (Email Enumeration Attack)
-    // เราจะตอบกลับสำเร็จกลับไป
     if (!user) {
-      console.log(`ℹ️ [Forgot Password] ไม่พบอีเมล: ${normalizedEmail} ในระบบ (ตอบกลับสำเร็จหลอกเพื่อความปลอดภัย)`);
       return NextResponse.json(
-        { message: 'หากอีเมลนี้อยู่ในระบบ ลิงก์สำหรับเปลี่ยนรหัสผ่านได้ถูกส่งไปยังอีเมลของท่านเรียบร้อยแล้ว' },
-        { status: 200 }
+        { error: 'ไม่พบบัญชีผู้ใช้ในระบบ กรุณาตรวจสอบอีเมลหรือรหัสนิสิตอีกครั้ง' },
+        { status: 404 }
       );
     }
 
-    // สร้าง Token สำหรับรีเซ็ตรหัสผ่านที่มีความยาวและปลอดภัย โดยกำหนดอายุ 1 ชั่วโมง
-    const resetToken = jwt.sign(
-      { 
-        userId: user.id, 
-        email: user.email, 
-        purpose: 'password-reset' 
-      },
-      process.env.JWT_SECRET || 'fallback-secret',
-      { expiresIn: '1h' }
-    );
-
-    // สร้าง ลิงก์สำหรับเปลี่ยนรหัสผ่าน
-    const origin = request.nextUrl.origin;
-    const resetLink = `${origin}/reset-password?token=${resetToken}`;
-
-    console.log(`🔒 [Forgot Password] ได้สร้างลิงก์เปลี่ยนรหัสผ่านสำหรับ: ${normalizedEmail}`);
-
-    // ส่งอีเมลแจ้งเตือนลิงก์เปลี่ยนรหัสผ่าน
-    const emailSent = await sendResetPasswordEmail(normalizedEmail, resetLink);
-    
-    if (!emailSent) {
+    if (!user.faceData) {
       return NextResponse.json(
-        { error: 'เกิดข้อผิดพลาดในการส่งลิงก์เปลี่ยนรหัสผ่าน กรุณาลองใหม่อีกครั้งภายหลัง' },
-        { status: 500 }
+        { error: 'บัญชีนี้ยังไม่ได้ลงทะเบียนข้อมูลใบหน้า กรุณาติดต่อผู้ดูแลระบบเพื่อรีเซ็ตรหัสผ่าน' },
+        { status: 400 }
       );
     }
 
-    return NextResponse.json(
-      { message: 'หากอีเมลนี้อยู่ในระบบ ลิงก์สำหรับเปลี่ยนรหัสผ่านได้ถูกส่งไปยังอีเมลของท่านเรียบร้อยแล้ว' },
-      { status: 200 }
-    );
+    return NextResponse.json({
+      success: true,
+      userId: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      studentId: user.studentId
+    });
 
   } catch (error) {
     console.error('❌ [Forgot Password API] เกิดข้อผิดพลาด:', error);
     return NextResponse.json(
-      { error: 'เกิดข้อผิดพลาดในการกู้คืนรหัสผ่าน กรุณาตรวจสอบข้อมูลอีกครั้ง' },
+      { error: 'เกิดข้อผิดพลาดในการตรวจสอบบัญชี กรุณาลองใหม่อีกครั้งภายหลัง' },
       { status: 500 }
     );
   }

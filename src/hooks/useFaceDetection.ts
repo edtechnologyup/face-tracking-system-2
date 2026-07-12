@@ -156,13 +156,6 @@ export function useFaceDetection() {
     }
   }, [])
 
-  // ตั้งค่าโหมด mismatch
-  const setMismatchMode = useCallback((enabled: boolean) => {
-    if (detectorRef.current) {
-      detectorRef.current.setMismatchMode(enabled)
-    }
-  }, [])
-
   return {
     isActive,
     currentData,
@@ -179,7 +172,6 @@ export function useFaceDetection() {
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
     recordFaceMismatchEvent,
-    setMismatchMode,
     detector: detectorRef.current
   }
 }

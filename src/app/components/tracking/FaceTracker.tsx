@@ -42,8 +42,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     getCurrentStats,
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
-    recordFaceMismatchEvent,
-    setMismatchMode
+    recordFaceMismatchEvent
   } = useFaceDetection()
 
   // State สำหรับควบคุมระบบเปรียบเทียบใบหน้าคนสวมสิทธิ์
@@ -113,7 +112,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           if (isMismatchDetected) {
             console.log('🔒 [Security System] ผู้สอบตัวจริงกลับมาเข้าระบบแล้ว ปลดล็อกสถานะ mismatch')
             setIsMismatchDetected(false)
-            setMismatchMode(false) // ปลดบล็อกให้จับพิกัดใบหน้าหลักต่อ
             
             // ถ้าหากเคยมีสถานะ mismatch ก่อนหน้านี้ ให้คำนวณระยะเวลาแล้วบันทึก event ลง database
             if (activeMismatchStartTime.current) {
@@ -135,12 +133,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           consecutiveMismatches.current += 1
           console.warn(`🔒 [Security System] ⚠️ ตรวจพบใบหน้าไม่ตรงกับผู้สอบ! ครั้งที่ ${consecutiveMismatches.current}`)
           
-          // ตรวจจับและบล็อกทันทีตั้งแต่ครั้งแรกเพื่อความปลอดภัยสูงสุดและรวดเร็ว
+          // ตรวจจับและเก็บข้อมูลทันทีตั้งแต่ครั้งแรกเพื่อความปลอดภัยสูงสุดและรวดเร็ว
           if (consecutiveMismatches.current >= 1) {
             if (!isMismatchDetected) {
-              console.warn('🔒 [Security System] 🚨 ยืนยันพบการสวมสิทธิ์สอบ! บันทึกช่วงเวลาสวมสิทธิ์ในฐานข้อมูลและซ่อนการตรวจจับ')
+              console.warn('🔒 [Security System] 🚨 ยืนยันพบการสวมสิทธิ์สอบ! บันทึกช่วงเวลาสวมสิทธิ์ในฐานข้อมูล')
               setIsMismatchDetected(true)
-              setMismatchMode(true) // สั่งบล็อกการตรวจจับใบหน้าสวมสิทธิ์ทันที (Silent Block)
               activeMismatchStartTime.current = new Date().toLocaleTimeString('th-TH', { hour12: false })
             }
           }
@@ -150,7 +147,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       // หากเกิด error เช่น "ไม่พบใบหน้า" (ห้องว่าง) เราจะไม่นับเป็น mismatch และข้ามไป
       console.log('Background verification check: No face present or network issue', error)
     }
-  }, [isFaceApiLoaded, isMismatchDetected, recordFaceMismatchEvent, setMismatchMode])
+  }, [isFaceApiLoaded, isMismatchDetected, recordFaceMismatchEvent])
 
   // ระบบตรวจสอบใบหน้าผู้สอบแบบวนซ้ำเป็นระยะ (ความถี่ทุก 2 วินาที เพื่อการตอบสนองที่รวดเร็ว)
   useEffect(() => {
@@ -456,7 +453,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       recordFaceMismatchEvent(activeMismatchStartTime.current, endTime, duration)
       activeMismatchStartTime.current = null
       setIsMismatchDetected(false)
-      setMismatchMode(false) // ปิดโหมดปิดกั้นการตรวจจับเมื่อสิ้นสุดการทำสอบ
     }
 
     const events = stopRecording()
@@ -509,7 +505,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       }
       alert(`หยุดติดตามแล้ว!\n\nสรุปผลลัพธ์:\n• หันซ้าย: ${statsData?.leftTurns?.count || 0} ครั้ง (${statsData?.leftTurns?.totalDuration || 0} วิ)\n• หันขวา: ${statsData?.rightTurns?.count || 0} ครั้ง (${statsData?.rightTurns?.totalDuration || 0} วิ)\n• ก้มหน้า: ${statsData?.lookingDown?.count || 0} ครั้ง (${statsData?.lookingDown?.totalDuration || 0} วิ)\n• เงยหน้า: ${statsData?.lookingUp?.count || 0} ครั้ง (${statsData?.lookingUp?.totalDuration || 0} วิ)\n• รวม events: ${statsData?.totalEvents || 0} ครั้ง`)
     }
-  }, [stopRecording, getCurrentStats, currentSessionId, saveOrientationData, endTrackingSession, getFaceDetectionLossStats, getFaceDetectionLossEvents, recordFaceMismatchEvent, setMismatchMode])
+  }, [stopRecording, getCurrentStats, currentSessionId, saveOrientationData, endTrackingSession, getFaceDetectionLossStats, getFaceDetectionLossEvents, recordFaceMismatchEvent])
 
   // หยุดการติดตาม
   const stopTracking = useCallback(() => {
