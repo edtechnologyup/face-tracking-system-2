@@ -395,6 +395,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         duration: number;
         maxYaw?: number;
         maxPitch?: number;
+        confidence?: number;
       }>)
       .filter(event => event.direction !== 'CENTER') // กรอง CENTER ออก
       .map(event => ({
@@ -404,6 +405,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         duration: event.duration,
         maxYaw: event.maxYaw || 0,
         maxPitch: event.maxPitch || 0,
+        confidence: typeof event.confidence === 'number' ? event.confidence : 0.95,
         isActive: false
       }))
 
