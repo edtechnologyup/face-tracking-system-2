@@ -99,7 +99,7 @@ export function BehaviorChart({ data }: BehaviorChartProps) {
               position: 'insideLeft',
               style: { textAnchor: 'middle', fontSize: '12px', fill: '#666' }
             }}
-            domain={[0, 100]}
+            domain={[0, 'auto']}
           />
           <YAxis 
             yAxisId="right"
@@ -112,7 +112,7 @@ export function BehaviorChart({ data }: BehaviorChartProps) {
               position: 'insideRight',
               style: { textAnchor: 'middle', fontSize: '12px', fill: '#666' }
             }}
-            domain={[0, 500]}
+            domain={[0, 'auto']}
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend 

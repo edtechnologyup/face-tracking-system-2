@@ -10,6 +10,7 @@ interface RegisterFormProps {
     lastName: string
     studentId: string
     phoneNumber: string
+    section: string
     email: string
     password: string
     confirmPassword: string
@@ -19,6 +20,11 @@ interface RegisterFormProps {
   onChange: (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void
   onBlur: (field: string) => () => void
 }
+
+const SECTION_OPTIONS = [
+  { value: "Sec 1", label: "Section 1 (กลุ่ม 1)" },
+  { value: "Sec 2", label: "Section 2 (กลุ่ม 2)" }
+]
 
 export function RegisterForm({ 
   formData, 
@@ -56,14 +62,26 @@ export function RegisterForm({
         />
       </div>
       
-      <Input
-        label="รหัสผู้เรียน"
-        value={formData.studentId}
-        onChange={onChange("studentId")}
-        onBlur={onBlur("studentId")}
-        placeholder="650xxxx"
-        error={errors.studentId || duplicateErrors.studentId}
-      />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Input
+          label="รหัสผู้เรียน"
+          value={formData.studentId}
+          onChange={onChange("studentId")}
+          onBlur={onBlur("studentId")}
+          placeholder="650xxxx"
+          error={errors.studentId || duplicateErrors.studentId}
+        />
+        
+        <Select
+          label="กลุ่มเรียน / เซกชัน"
+          value={formData.section}
+          onChange={onChange("section")}
+          placeholder="กรุณาเลือกกลุ่มเรียน"
+          required
+          error={errors.section}
+          options={SECTION_OPTIONS}
+        />
+      </div>
       
       <Input
         label="เบอร์โทรศัพท์"

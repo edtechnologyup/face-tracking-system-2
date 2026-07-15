@@ -8,7 +8,7 @@ import { DetectionStats } from './DetectionStats'
 import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
 import { useFaceDetection } from '@/hooks/useFaceDetection'
-import { drawSciFiFaceMesh, drawStatusInfo } from '@/lib/face-mesh-utils'
+import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
 import { loadFaceApiModels, detectFaceAndGetDescriptor } from '@/lib/face-api/detection'
 import toast from 'react-hot-toast'
 
@@ -23,6 +23,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   
   // State สำหรับ session management
   const sessionIdRef = useRef<string | null>(null)
+  const isSessionSavedRef = useRef(false)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
@@ -145,7 +146,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       }
     } catch (error) {
       // หากเกิด error เช่น "ไม่พบใบหน้า" (ห้องว่าง) เราจะไม่นับเป็น mismatch และข้ามไป
-      console.log('Background verification check: No face present or network issue', error)
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes("ไม่พบใบหน้า") || message.includes("คุณภาพการตรวจจับใบหน้าไม่เพียงพอ")) {
+        console.log('🔒 [Security System] Background verification: ไม่พบใบหน้าผู้สอบในกล้อง (ข้ามการตรวจสอบ)')
+      } else {
+        console.warn('🔒 [Security System] Background verification error:', message)
+      }
     }
   }, [isFaceApiLoaded, isMismatchDetected, recordFaceMismatchEvent])
 
@@ -215,30 +221,13 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
     if (!data.isDetected) {
-      // แสดงข้อความเมื่อไม่พบใบหน้า
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.8)'
-      ctx.font = '24px Arial'
-      ctx.fillText('ไม่พบใบหน้า', 50, 50)
       return
     }
 
-    // แสดงเตือนหลายใบหน้า (ความปลอดภัยในการสอบ)
-    if (data.multipleFaces && data.multipleFaces.isSecurityRisk) {
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.9)'
-      ctx.font = 'bold 20px Arial'
-      ctx.fillText('🚨 เตือน: พบหลายใบหน้าในการสอบ!', 50, 30)
-      ctx.fillStyle = 'rgba(255, 255, 0, 0.8)'
-      ctx.font = '16px Arial'
-      ctx.fillText(`จำนวนใบหน้า: ${data.multipleFaces.count}`, 50, 55)
-    }
-
-    // วาด Sci-Fi Face Mesh ด้วย landmarks ทั้ง 468 จุด
+    // วาด Sci-Fi Face Mesh ด้วย landmarks ทั้ง 468 จุด เท่านั้น (ไม่มีการเขียนข้อความทับกล้อง)
     if (data.landmarks && data.landmarks.length > 0) {
       drawSciFiFaceMesh(ctx, data.landmarks, video, canvas.width, canvas.height, data.orientation.isLookingAway)
     }
-
-    // แสดงข้อมูลสถานะ
-    drawStatusInfo(ctx, data, canvas.width, canvas.height)
   }, [])
 
   // ตัวแปรป้องกันการสร้าง session พร้อมกัน
@@ -288,6 +277,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       }
 
       sessionIdRef.current = result.data.sessionId
+      isSessionSavedRef.current = false
       setCurrentSessionId(result.data.sessionId)
       console.log('✅ สร้าง tracking session สำเร็จ:', result.data.sessionId)
       
@@ -472,6 +462,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       const saveResult = await saveOrientationData(currentSessionId, events, stats, faceDetectionLossStats, faceDetectionLossEvents)
       
       if (saveResult) {
+        isSessionSavedRef.current = true
         // จบ tracking session
         await endTrackingSession(currentSessionId)
         // ล้าง session reference และ flags เพื่อป้องกันการใช้ซ้ำ
@@ -524,10 +515,56 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     onTrackingStop()
   }, [stopDetection, stopCamera, onTrackingStop, isRecording, handleStopRecording])
 
-  // Cleanup เมื่อ component unmount
+  // ดักจับการปิดแท็บ คืนค่า หรือปิดหน้าต่างเบราว์เซอร์
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const sessionId = sessionIdRef.current
+      const isSaved = isSessionSavedRef.current
+      
+      if (sessionId && !isSaved) {
+        const token = localStorage.getItem('token')
+        if (token) {
+          // ใช้ keepalive: true เพื่อให้บราวเซอร์ส่ง DELETE request ไปลบ session ให้สำเร็จแม้ปิดแท็บ
+          fetch(`/api/tracking/sessions?sessionId=${sessionId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            keepalive: true
+          })
+        }
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
+
+  // Cleanup เมื่อ component unmount (เช่น ย้ายหน้า, ออกจากหน้าตรวจจับ)
   useEffect(() => {
     return () => {
       stopCamera(videoRef)
+      
+      const sessionId = sessionIdRef.current
+      const isSaved = isSessionSavedRef.current
+      
+      // ถ้ายกเลิก/ออกจากหน้านี้โดยที่ไม่ได้กดยกเลิกแบบกดเซฟ ให้ลบเซสชันใน db ด้วย
+      if (sessionId && !isSaved) {
+        console.log('🗑️ Discarding unsaved tracking session on unmount:', sessionId)
+        const token = localStorage.getItem('token')
+        if (token) {
+          fetch(`/api/tracking/sessions?sessionId=${sessionId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            },
+            keepalive: true
+          }).catch(err => console.error('Error discarding session:', err))
+        }
+      }
+      
       // ล้าง session reference และ flags เมื่อ component ถูก unmount
       sessionIdRef.current = null
       sessionCreationInProgress.current = false

@@ -35,7 +35,7 @@ const AVAILABLE_POSES: PoseData[] = [
   { type: 'right', title: 'หันขวา', instruction: 'หันหน้าไปทางขวา 30 องศา', icon: '👉' }
 ]
 
-export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
+export function FaceLogin({ isOpen, userId, onSuccess, onCancel }: FaceLoginProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const poseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -446,8 +446,15 @@ export function FaceLogin({ isOpen, userId, onSuccess }: FaceLoginProps) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
-      <Card className="p-8 w-full max-w-lg">
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-black bg-opacity-50">
+      <Card className="p-8 w-full max-w-lg relative bg-white">
+        <button 
+          onClick={onCancel}
+          className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 font-bold text-lg cursor-pointer z-10"
+          disabled={loading}
+        >
+          ✕
+        </button>
         <div className="text-center mb-6">
           <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-full mx-auto mb-4 flex items-center justify-center">
             <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

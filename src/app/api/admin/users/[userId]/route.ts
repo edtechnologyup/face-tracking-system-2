@@ -51,7 +51,7 @@ export async function PUT(
 
     const { userId } = await params
     const body = await request.json()
-    const { email, password, title, firstName, lastName, studentId, phoneNumber, role, isActive } = body
+    const { email, password, title, firstName, lastName, studentId, phoneNumber, role, isActive, section } = body
 
     // ดึงข้อมูลผู้ใช้ปัจจุบันเพื่อเปรียบเทียบ
     const currentUser = await prisma.user.findUnique({
@@ -70,6 +70,7 @@ export async function PUT(
       lastName?: string
       studentId?: string | null
       phoneNumber?: string | null
+      section?: string | null
       password?: string
       role?: 'ADMIN' | 'USER'
       isActive?: boolean
@@ -140,6 +141,11 @@ export async function PUT(
       }
     }
 
+    // อัปเดตเซกชัน
+    if (section !== undefined) {
+      updateData.section = section || null
+    }
+
     // ตรวจสอบและตั้งรหัสผ่านใหม่ (ถ้ามีการส่งมา)
     if (password) {
       const passwordVal = validatePassword(password)
@@ -173,6 +179,7 @@ export async function PUT(
         lastName: true,
         studentId: true,
         phoneNumber: true,
+        section: true,
         role: true,
         isActive: true,
         createdAt: true

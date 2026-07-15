@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log('Request body:', body)
     
-    const { email, password, title, firstName, lastName, studentId, phoneNumber } = body
+    const { email, password, title, firstName, lastName, studentId, phoneNumber, section } = body
 
     // ตรวจสอบฟิลด์ที่จำเป็น
     if (!email || !password || !title || !firstName || !lastName) {
@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
         lastName,
         studentId: studentId || null,
         phoneNumber: phoneNumber || null,
+        section: section || null,
         faceData: null // เพิ่มทีหลัง
       }
     })
@@ -148,7 +149,8 @@ export async function POST(request: NextRequest) {
         firstName: user.firstName,
         lastName: user.lastName,
         studentId: user.studentId,
-        phoneNumber: user.phoneNumber
+        phoneNumber: user.phoneNumber,
+        section: user.section
       }
     }, { status: 201 })
 

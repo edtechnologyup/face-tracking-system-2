@@ -17,6 +17,7 @@ interface FormData {
   lastName: string;
   studentId: string;
   phoneNumber: string;
+  section: string;
 }
 
 interface AuthFormProps {
@@ -35,6 +36,7 @@ export function AuthForm({ type, onSubmit, loading = false }: AuthFormProps) {
     lastName: "",
     studentId: "",
     phoneNumber: "",
+    section: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [, setChecking] = useState<Record<string, boolean>>({});
@@ -81,6 +83,11 @@ export function AuthForm({ type, onSubmit, loading = false }: AuthFormProps) {
       const phoneValidation = validatePhoneNumber(formData.phoneNumber);
       if (!phoneValidation.isValid) {
         newErrors.phoneNumber = phoneValidation.error || "เบอร์โทรศัพท์ไม่ถูกต้อง";
+      }
+
+      // ตรวจสอบความถูกต้องกลุ่มเรียน / เซกชัน
+      if (!formData.section) {
+        newErrors.section = "กรุณาเลือกกลุ่มเรียน / เซกชัน";
       }
 
       // ตรวจสอบความถูกต้องรหัสผ่าน

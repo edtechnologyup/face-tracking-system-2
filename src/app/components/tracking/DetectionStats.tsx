@@ -7,26 +7,21 @@ interface DetectionStatsProps {
 }
 
 export function DetectionStats({ data, isActive }: DetectionStatsProps) {
-  // ฟังก์ชันกำหนดทิศทางการหัน
-  const getOrientationIndicator = (yaw: number, pitch: number) => {
-    const absYaw = Math.abs(yaw)
-    const absPitch = Math.abs(pitch)
-    
-    if (absYaw > absPitch) {
-      if (yaw > 25) {
-        return { direction: 'หันขวา →', color: 'bg-orange-100 text-orange-800' }
-      } else if (yaw < -25) {
+  // ฟังก์ชันกำหนดทิศทางการหันตามทิศทางที่ได้จาก detector
+  const getOrientationIndicator = (direction?: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER') => {
+    switch (direction) {
+      case 'LEFT':
         return { direction: '← หันซ้าย', color: 'bg-orange-100 text-orange-800' }
-      }
-    } else {
-      if (pitch > 12) {
-        return { direction: 'ก้มหน้า ↓', color: 'bg-purple-100 text-purple-800' }
-      } else if (pitch < -12) {
+      case 'RIGHT':
+        return { direction: 'หันขวา →', color: 'bg-orange-100 text-orange-800' }
+      case 'UP':
         return { direction: '↑ เงยหน้า', color: 'bg-purple-100 text-purple-800' }
-      }
+      case 'DOWN':
+        return { direction: 'ก้มหน้า ↓', color: 'bg-purple-100 text-purple-800' }
+      case 'CENTER':
+      default:
+        return { direction: 'มองตรง ●', color: 'bg-green-100 text-green-800' }
     }
-    
-    return { direction: 'มองตรง ●', color: 'bg-green-100 text-green-800' }
   }
 
   if (!isActive || !data) return null
@@ -69,8 +64,8 @@ export function DetectionStats({ data, isActive }: DetectionStatsProps) {
         <div className="p-2 rounded bg-gray-100 text-gray-800">
           Landmarks: {data.landmarks?.length || 0} จุด
         </div>
-        <div className={`p-2 rounded ${!data.isDetected ? 'bg-gray-100 text-gray-800' : getOrientationIndicator(data.orientation.yaw, data.orientation.pitch).color}`}>
-          ทิศทาง: {!data.isDetected ? 'ไม่พบใบหน้า' : getOrientationIndicator(data.orientation.yaw, data.orientation.pitch).direction}
+        <div className={`p-2 rounded ${!data.isDetected ? 'bg-gray-100 text-gray-800' : getOrientationIndicator(data.orientation.direction).color}`}>
+          ทิศทาง: {!data.isDetected ? 'ไม่พบใบหน้า' : getOrientationIndicator(data.orientation.direction).direction}
         </div>
       </div>
 

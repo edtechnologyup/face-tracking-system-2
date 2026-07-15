@@ -15,6 +15,7 @@ interface TrackingSession {
     lastName: string
     email: string
     studentId?: string | null
+    section?: string | null
   }
 }
 
@@ -104,7 +105,7 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-purple-50/50">
               <tr>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">ชื่อเซสชัน</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">กลุ่มเรียน (Section)</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">ผู้ใช้</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">เริ่มต้น</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">สิ้นสุด</th>
@@ -123,8 +124,14 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
               ) : (
                 sessions.map((session) => (
                   <tr key={session.id} className="hover:bg-purple-50/20 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {session.sessionName || 'ไม่ระบุชื่อ'}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        session.user.section === 'Sec 1' ? 'bg-purple-100 text-purple-800' :
+                        session.user.section === 'Sec 2' ? 'bg-indigo-100 text-indigo-800' :
+                        'bg-gray-100 text-gray-500'
+                      }`}>
+                        {session.user.section || 'ไม่มีกลุ่มเรียน'}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <span className="font-medium text-gray-900">{session.user.firstName} {session.user.lastName}</span>

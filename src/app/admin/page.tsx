@@ -16,6 +16,7 @@ interface User {
   lastName: string
   studentId: string | null
   phoneNumber: string | null
+  section: string | null
   role: string
   isActive: boolean
   createdAt: string
@@ -32,6 +33,7 @@ interface TrackingSession {
     lastName: string
     email: string
     studentId?: string | null
+    section?: string | null
   }
 }
 
@@ -243,10 +245,10 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">
-                  {getCurrentPageTitle(currentPage)}
+                  {getCurrentPageTitle(currentPage, !!selectedSessionId)}
                 </h1>
                 <p className="text-sm text-purple-600 mt-1">
-                  {getCurrentPageDescription(currentPage)}
+                  {getCurrentPageDescription(currentPage, !!selectedSessionId)}
                 </p>
               </div>
               {/* Mobile space for hamburger button */}
@@ -306,7 +308,10 @@ export default function AdminDashboard() {
 }
 
 // Helper functions for page titles and descriptions
-function getCurrentPageTitle(page: string): string {
+function getCurrentPageTitle(page: string, isSessionSelected: boolean = false): string {
+  if (page === 'sessions' && isSessionSelected) {
+    return 'Session Details'
+  }
   const titles: Record<string, string> = {
     'overview': 'Dashboard Overview',
     'users': 'User Management',
@@ -315,7 +320,10 @@ function getCurrentPageTitle(page: string): string {
   return titles[page] || 'Admin Dashboard'
 }
 
-function getCurrentPageDescription(page: string): string {
+function getCurrentPageDescription(page: string, isSessionSelected: boolean = false): string {
+  if (page === 'sessions' && isSessionSelected) {
+    return 'ข้อมูลสถิติและล็อกพฤติกรรมโดยละเอียดของผู้เข้าสอบ'
+  }
   const descriptions: Record<string, string> = {
     'overview': 'ภาพรวมสถิติและข้อมูลระบบ',
     'users': 'จัดการผู้ใช้งานและสิทธิ์เข้าถึง',

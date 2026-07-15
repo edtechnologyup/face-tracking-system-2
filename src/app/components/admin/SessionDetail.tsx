@@ -25,6 +25,7 @@ interface SessionDetail {
       lastName: string
       email: string
       studentId?: string | null
+      section?: string | null
     }
   }
   logs: TrackingLog[]
@@ -170,7 +171,7 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
       {/* Session Info Card */}
       <Card className="p-3.5">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">ข้อมูลเซสชัน</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
             <p className="text-sm text-gray-600">ผู้ใช้</p>
             <p className="font-medium">
@@ -179,6 +180,12 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
             {sessionDetail.session.user.studentId && (
               <p className="text-sm text-gray-500">รหัส: {sessionDetail.session.user.studentId}</p>
             )}
+          </div>
+          <div>
+            <p className="text-sm text-gray-600">กลุ่มเรียน (Section)</p>
+            <p className="font-medium text-purple-700">
+              {sessionDetail.session.user.section || 'ไม่มีกลุ่มเรียน'}
+            </p>
           </div>
           <div>
             <p className="text-sm text-gray-600">เริ่มต้น</p>

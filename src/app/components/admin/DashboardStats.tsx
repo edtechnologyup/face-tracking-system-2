@@ -19,14 +19,14 @@ interface DashboardStatsProps {
   chartData?: BehaviorData[]
 }
 
-export function DashboardStats({ totalUsers, totalAdmins, totalSessions, chartData = [] }: DashboardStatsProps) {
+export function DashboardStats({ totalUsers, totalAdmins, totalSessions, activeSessions, chartData = [] }: DashboardStatsProps) {
   console.log('DashboardStats chartData:', chartData)
   console.log('Chart data length:', chartData.length)
   
   return (
     <>
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <Card className="p-4">
           <div className="flex items-center">
             <div className="p-2 rounded-full bg-blue-100 mr-3">
@@ -65,6 +65,22 @@ export function DashboardStats({ totalUsers, totalAdmins, totalSessions, chartDa
             <div>
               <p className="text-sm font-medium text-gray-600">เซสชันทั้งหมด</p>
               <p className="text-xl font-bold text-gray-900">{totalSessions}</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4">
+          <div className="flex items-center">
+            <div className="p-2 rounded-full bg-yellow-100 mr-3 relative">
+              <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
+              <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">เซสชันกำลังดำเนินการ</p>
+              <p className="text-xl font-bold text-gray-900">{activeSessions}</p>
             </div>
           </div>
         </Card>

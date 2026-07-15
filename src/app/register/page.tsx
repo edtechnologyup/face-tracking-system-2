@@ -16,6 +16,7 @@ export default function RegisterPage() {
     lastName: string;
     studentId?: string;
     phoneNumber?: string;
+    section?: string;
   }
   
   const [userData, setUserData] = useState<UserData | null>(null)
@@ -39,7 +40,8 @@ export default function RegisterPage() {
           lastName: data.lastName,
           studentId: data.studentId,
           title: data.title,
-          phoneNumber: data.phoneNumber
+          phoneNumber: data.phoneNumber,
+          section: data.section
         })
       })
 

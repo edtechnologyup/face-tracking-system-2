@@ -54,7 +54,8 @@ export async function GET(
             firstName: true,
             lastName: true,
             email: true,
-            studentId: true
+            studentId: true,
+            section: true
           }
         }
       }

@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
         lastName: true,
         studentId: true,
         phoneNumber: true,
+        section: true,
         role: true,
         isActive: true,
         createdAt: true
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { email, password, title, firstName, lastName, studentId, phoneNumber, role } = body
+    const { email, password, title, firstName, lastName, studentId, phoneNumber, role, section } = body
 
     // ตรวจสอบฟิลด์ที่จำเป็น
     if (!email || !password || !title || !firstName || !lastName) {
@@ -156,6 +157,7 @@ export async function POST(request: NextRequest) {
         lastName,
         studentId: studentId || null,
         phoneNumber: phoneNumber || null,
+        section: section || null,
         role: role === 'ADMIN' ? 'ADMIN' : 'USER',
         isActive: true,
         faceData: null
@@ -167,6 +169,7 @@ export async function POST(request: NextRequest) {
         lastName: true,
         studentId: true,
         phoneNumber: true,
+        section: true,
         role: true,
         isActive: true,
         createdAt: true

@@ -24,6 +24,7 @@ interface User {
   lastName: string
   studentId: string | null
   phoneNumber: string | null
+  section: string | null
   role: string
   isActive: boolean
   createdAt: string
@@ -51,9 +52,16 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
     lastName: '',
     studentId: '',
     phoneNumber: '',
+    section: '',
     role: 'USER',
     isActive: true
   })
+
+  // Filter states
+  const [searchTerm, setSearchTerm] = useState('')
+  const [sectionFilter, setSectionFilter] = useState('ALL')
+  const [roleFilter, setRoleFilter] = useState('ALL')
+  const [statusFilter, setStatusFilter] = useState('ALL')
 
   // Errors & Loading State
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -92,6 +100,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
       lastName: '',
       studentId: '',
       phoneNumber: '',
+      section: '',
       role: 'USER',
       isActive: true
     })
@@ -111,6 +120,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
       lastName: user.lastName,
       studentId: user.studentId || '',
       phoneNumber: user.phoneNumber || '',
+      section: user.section || '',
       role: user.role,
       isActive: user.isActive
     })
@@ -127,6 +137,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
         lastName: user.lastName,
         studentId: user.studentId || '',
         phoneNumber: user.phoneNumber || '',
+        section: user.section || '',
         role: user.role,
         isActive: user.isActive
       })
@@ -244,6 +255,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
         lastName: string
         studentId: string | null
         phoneNumber: string | null
+        section: string | null
         role: string
         isActive: boolean
         password?: string
@@ -254,6 +266,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
         lastName: formData.lastName,
         studentId: formData.studentId || null,
         phoneNumber: formData.phoneNumber || null,
+        section: formData.section || null,
         role: formData.role,
         isActive: formData.isActive
       }
@@ -320,6 +333,30 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
     }
   }
 
+  // Filter logic
+  const filteredUsers = users.filter(user => {
+    const searchLower = searchTerm.toLowerCase()
+    const matchesSearch = 
+      user.firstName.toLowerCase().includes(searchLower) ||
+      user.lastName.toLowerCase().includes(searchLower) ||
+      user.email.toLowerCase().includes(searchLower) ||
+      (user.studentId && user.studentId.toLowerCase().includes(searchLower))
+
+    const matchesSection = 
+      sectionFilter === 'ALL' || 
+      (sectionFilter === 'null' && !user.section) ||
+      user.section === sectionFilter
+
+    const matchesRole = roleFilter === 'ALL' || user.role === roleFilter
+
+    const matchesStatus = 
+      statusFilter === 'ALL' || 
+      (statusFilter === 'ACTIVE' && user.isActive) ||
+      (statusFilter === 'INACTIVE' && !user.isActive)
+
+    return matchesSearch && matchesSection && matchesRole && matchesStatus
+  })
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -335,6 +372,63 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
         </button>
       </div>
 
+      {/* Filter Bar */}
+      <div className="bg-white p-4 rounded-xl border border-purple-100 shadow-sm grid grid-cols-1 sm:grid-cols-4 gap-4 animate-fade-in">
+        <div>
+          <label className="block text-xs font-semibold text-purple-700 mb-1">ค้นหาผู้ใช้</label>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="ค้นหาชื่อ, อีเมล, รหัส..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            />
+            <span className="absolute left-2.5 top-2 text-gray-405">🔍</span>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-purple-700 mb-1">กลุ่มเรียน (Section)</label>
+          <select
+            value={sectionFilter}
+            onChange={(e) => setSectionFilter(e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 cursor-pointer"
+          >
+            <option value="ALL">ทั้งหมด (All Sections)</option>
+            <option value="Sec 1">Section 1 (กลุ่ม 1)</option>
+            <option value="Sec 2">Section 2 (กลุ่ม 2)</option>
+            <option value="null">ไม่มีกลุ่มเรียน (N/A)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-purple-700 mb-1">สิทธิ์ (Role)</label>
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-305 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 cursor-pointer"
+          >
+            <option value="ALL">สิทธิ์ทั้งหมด</option>
+            <option value="USER">ผู้ใช้งานปกติ (USER)</option>
+            <option value="ADMIN">ผู้ดูแลระบบ (ADMIN)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-purple-700 mb-1">สถานะ (Status)</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-305 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 cursor-pointer"
+          >
+            <option value="ALL">สถานะทั้งหมด</option>
+            <option value="ACTIVE">ใช้งานปกติ</option>
+            <option value="INACTIVE">ระงับการใช้งาน</option>
+          </select>
+        </div>
+      </div>
+
       <Card className="p-0 overflow-hidden shadow-sm border border-purple-100">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -343,6 +437,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">ชื่อ-นามสกุล</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">อีเมล</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">รหัสนักศึกษา</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">กลุ่มเรียน</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">สิทธิ์</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">สถานะ</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-purple-800 uppercase tracking-wider">เบอร์โทร</th>
@@ -351,20 +446,29 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-100">
-              {users.length === 0 ? (
+              {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-10 text-center text-gray-500">
                     ไม่พบข้อมูลผู้ใช้งาน
                   </td>
                 </tr>
               ) : (
-                users.map((user) => (
+                filteredUsers.map((user) => (
                   <tr key={user.id} className="hover:bg-purple-50/20 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {user.firstName} {user.lastName}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.studentId || 'N/A'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        user.section === 'Sec 1' ? 'bg-purple-100 text-purple-800' :
+                        user.section === 'Sec 2' ? 'bg-indigo-100 text-indigo-800' :
+                        'bg-gray-100 text-gray-500'
+                      }`}>
+                        {user.section || 'ไม่มีกลุ่มเรียน'}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                         user.role === 'ADMIN' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
@@ -475,14 +579,26 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
                   placeholder="65xxxxxx"
                   error={errors.studentId}
                 />
-                <Input
-                  label="เบอร์โทรศัพท์ (ถ้ามี)"
-                  value={formData.phoneNumber}
-                  onChange={handleInputChange('phoneNumber')}
-                  placeholder="08xxxxxxxx"
-                  error={errors.phoneNumber}
+                <Select
+                  label="กลุ่มเรียน / เซกชัน"
+                  value={formData.section}
+                  onChange={handleInputChange('section')}
+                  placeholder="เลือกกลุ่มเรียน"
+                  options={[
+                    { value: 'Sec 1', label: 'Section 1 (กลุ่ม 1)' },
+                    { value: 'Sec 2', label: 'Section 2 (กลุ่ม 2)' }
+                  ]}
+                  error={errors.section}
                 />
               </div>
+
+              <Input
+                label="เบอร์โทรศัพท์ (ถ้ามี)"
+                value={formData.phoneNumber}
+                onChange={handleInputChange('phoneNumber')}
+                placeholder="08xxxxxxxx"
+                error={errors.phoneNumber}
+              />
 
               <Input
                 label="อีเมล"
@@ -622,14 +738,26 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
                   placeholder="65xxxxxx"
                   error={errors.studentId}
                 />
-                <Input
-                  label="เบอร์โทรศัพท์ (ถ้ามี)"
-                  value={formData.phoneNumber}
-                  onChange={handleInputChange('phoneNumber')}
-                  placeholder="08xxxxxxxx"
-                  error={errors.phoneNumber}
+                <Select
+                  label="กลุ่มเรียน / เซกชัน"
+                  value={formData.section}
+                  onChange={handleInputChange('section')}
+                  placeholder="เลือกกลุ่มเรียน"
+                  options={[
+                    { value: 'Sec 1', label: 'Section 1 (กลุ่ม 1)' },
+                    { value: 'Sec 2', label: 'Section 2 (กลุ่ม 2)' }
+                  ]}
+                  error={errors.section}
                 />
               </div>
+
+              <Input
+                label="เบอร์โทรศัพท์ (ถ้ามี)"
+                value={formData.phoneNumber}
+                onChange={handleInputChange('phoneNumber')}
+                placeholder="08xxxxxxxx"
+                error={errors.phoneNumber}
+              />
 
               <Input
                 label="อีเมล"
