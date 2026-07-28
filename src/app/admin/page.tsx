@@ -28,6 +28,7 @@ interface TrackingSession {
   startTime: string
   endTime: string | null
   totalDuration: number | null
+  status: 'IN_PROGRESS' | 'COMPLETED' | 'INTERRUPTED' | string
   user: {
     firstName: string
     lastName: string

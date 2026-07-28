@@ -40,11 +40,12 @@ export async function GET(request: NextRequest) {
     }
 
     // ดึงข้อมูลสถิติ
-    const [totalUsers, totalAdmins, totalSessions, activeSessions] = await Promise.all([
+    const [totalUsers, totalAdmins, totalSessions, activeSessions, interruptedSessions] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { role: 'ADMIN' } }),
       prisma.trackingSession.count(),
-      prisma.trackingSession.count({ where: { endTime: null } })
+      prisma.trackingSession.count({ where: { status: 'IN_PROGRESS', endTime: null } }),
+      prisma.trackingSession.count({ where: { status: 'INTERRUPTED' } })
     ])
 
     // ดึงข้อมูลพฤติกรรมสำหรับกราฟ
@@ -206,6 +207,7 @@ export async function GET(request: NextRequest) {
       totalAdmins,
       totalSessions,
       activeSessions,
+      interruptedSessions,
       chartData
     })
 

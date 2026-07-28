@@ -23,6 +23,9 @@ CREATE TABLE "users" (
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateEnum
+CREATE TYPE "SessionStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'INTERRUPTED');
+
 -- CreateTable
 CREATE TABLE "tracking_sessions" (
     "id" TEXT NOT NULL,
@@ -31,6 +34,7 @@ CREATE TABLE "tracking_sessions" (
     "startTime" TIMESTAMP(3) NOT NULL,
     "endTime" TIMESTAMP(3),
     "totalDuration" INTEGER,
+    "status" "SessionStatus" NOT NULL DEFAULT 'IN_PROGRESS',
 
     CONSTRAINT "tracking_sessions_pkey" PRIMARY KEY ("id")
 );

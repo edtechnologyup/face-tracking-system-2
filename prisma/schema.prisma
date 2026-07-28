@@ -35,16 +35,23 @@ model User {
   @@map("users")
 }
 
+enum SessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  INTERRUPTED
+}
+
 model TrackingSession {
-  id            String    @id @default(cuid())
+  id            String        @id @default(cuid())
   userId        String
-  sessionName   String?   // ชื่อการสอบ/เซสชัน
+  sessionName   String?       // ชื่อการสอบ/เซสชัน
   startTime     DateTime
   endTime       DateTime?
-  totalDuration Int?      // seconds
+  totalDuration Int?          // seconds
+  status        SessionStatus @default(IN_PROGRESS)
   
   // Relations
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   trackingLogs  TrackingLog[]
   statistics    SessionStatistics?
   

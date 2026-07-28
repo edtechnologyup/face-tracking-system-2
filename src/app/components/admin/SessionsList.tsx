@@ -10,6 +10,7 @@ interface TrackingSession {
   startTime: string
   endTime: string | null
   totalDuration: number | null
+  status?: 'IN_PROGRESS' | 'COMPLETED' | 'INTERRUPTED' | string
   user: {
     firstName: string
     lastName: string
@@ -140,16 +141,20 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(session.startTime)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {session.endTime ? formatDate(session.endTime) : 'กำลังดำเนินการ'}
+                      {session.endTime ? formatDate(session.endTime) : (session.status === 'INTERRUPTED' ? 'หยุดกลางคัน' : 'กำลังดำเนินการ')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {formatDuration(session.totalDuration)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        session.endTime ? 'bg-gray-100 text-gray-800' : 'bg-green-100 text-green-800 animate-pulse'
+                        session.status === 'INTERRUPTED' ? 'bg-red-100 text-red-800 border border-red-200' :
+                        session.status === 'COMPLETED' || session.endTime ? 'bg-gray-100 text-gray-800' :
+                        'bg-green-100 text-green-800 animate-pulse'
                       }`}>
-                        {session.endTime ? 'เสร็จสิ้น' : 'กำลังดำเนินการ'}
+                        {session.status === 'INTERRUPTED' ? 'หยุดการบันทึกกลางคัน' :
+                         session.status === 'COMPLETED' || session.endTime ? 'เสร็จสิ้น' :
+                         'กำลังดำเนินการ'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

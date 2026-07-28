@@ -20,6 +20,7 @@ interface SessionDetail {
     startTime: string
     endTime: string | null
     totalDuration: number | null
+    status?: 'IN_PROGRESS' | 'COMPLETED' | 'INTERRUPTED' | string
     user: {
       firstName: string
       lastName: string
@@ -171,7 +172,7 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
       {/* Session Info Card */}
       <Card className="p-3.5">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">ข้อมูลเซสชัน</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
           <div>
             <p className="text-sm text-gray-600">ผู้ใช้</p>
             <p className="font-medium">
@@ -194,12 +195,24 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
           <div>
             <p className="text-sm text-gray-600">สิ้นสุด</p>
             <p className="font-medium">
-              {sessionDetail.session.endTime ? formatDate(sessionDetail.session.endTime) : 'กำลังดำเนินการ'}
+              {sessionDetail.session.endTime ? formatDate(sessionDetail.session.endTime) : (sessionDetail.session.status === 'INTERRUPTED' ? 'หยุดกลางคัน' : 'กำลังดำเนินการ')}
             </p>
           </div>
           <div>
             <p className="text-sm text-gray-600">ระยะเวลา</p>
             <p className="font-medium">{formatDuration(sessionDetail.session.totalDuration)}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-600">สถานะเซสชัน</p>
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${
+              sessionDetail.session.status === 'INTERRUPTED' ? 'bg-red-100 text-red-800 border border-red-200' :
+              sessionDetail.session.status === 'COMPLETED' || sessionDetail.session.endTime ? 'bg-gray-100 text-gray-800' :
+              'bg-green-100 text-green-800 animate-pulse'
+            }`}>
+              {sessionDetail.session.status === 'INTERRUPTED' ? 'หยุดการบันทึกกลางคัน' :
+               sessionDetail.session.status === 'COMPLETED' || sessionDetail.session.endTime ? 'เสร็จสิ้น' :
+               'กำลังดำเนินการ'}
+            </span>
           </div>
         </div>
       </Card>

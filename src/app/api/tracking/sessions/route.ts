@@ -10,6 +10,7 @@ interface CreateSessionRequest {
 
 interface EndSessionRequest {
   sessionId: string;
+  status?: 'COMPLETED' | 'INTERRUPTED';
 }
 
 // สร้าง tracking session ใหม่
@@ -43,7 +44,8 @@ export async function POST(request: NextRequest) {
       data: {
         userId: userId,
         sessionName: sessionName,
-        startTime: getThailandTime()
+        startTime: getThailandTime(),
+        status: 'IN_PROGRESS'
       }
     })
 
@@ -56,7 +58,8 @@ export async function POST(request: NextRequest) {
         sessionId: newSession.id,  
         sessionName: newSession.sessionName,
         startTime: newSession.startTime,
-        userId: newSession.userId
+        userId: newSession.userId,
+        status: newSession.status
       }
     })
     
@@ -89,7 +92,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body: EndSessionRequest = await request.json()
-    const { sessionId } = body
+    const { sessionId, status: requestedStatus } = body
 
     if (!sessionId) {
       return NextResponse.json({ error: 'กรุณาระบุ sessionId' }, { status: 400 })
@@ -110,35 +113,38 @@ export async function PUT(request: NextRequest) {
     // คำนวณระยะเวลารวมเป็นวินาที พร้อมเวลาไทย (UTC+7)  
     const endTime = getThailandTime()
     const totalDuration = calculateDurationInSeconds(existingSession.startTime, endTime)
+    const newStatus = requestedStatus === 'INTERRUPTED' ? 'INTERRUPTED' : 'COMPLETED'
 
-    // อัปเดต session ให้จบ
+    // อัปเดต session ให้จบหรือหยุดกลางคัน
     const updatedSession = await prisma.trackingSession.update({
       where: { id: sessionId },
       data: {
         endTime: endTime,
-        totalDuration: totalDuration
+        totalDuration: totalDuration,
+        status: newStatus
       }
     })
 
-    console.log(`✅ จบ tracking session: ${sessionId} (ระยะเวลา: ${totalDuration} วิ)`)
+    console.log(`✅ อัปเดต tracking session: ${sessionId} (สถานะ: ${newStatus}, ระยะเวลา: ${totalDuration} วิ)`)
     
     return NextResponse.json({
       success: true,
-      message: 'จบ session สำเร็จ',
+      message: `อัปเดต session สำเร็จ (${newStatus})`,
       data: {
         sessionId: updatedSession.id,
         sessionName: updatedSession.sessionName,
         startTime: updatedSession.startTime,
         endTime: updatedSession.endTime,
         totalDuration: updatedSession.totalDuration,
-        durationInSeconds: totalDuration
+        durationInSeconds: totalDuration,
+        status: updatedSession.status
       }
     })
     
   } catch (error) {
-    console.error('❌ เกิดข้อผิดพลาดในการจบ session:', error)
+    console.error('❌ เกิดข้อผิดพลาดในการอัปเดต session:', error)
     return NextResponse.json(
-      { error: 'เกิดข้อผิดพลาดในการจบ session' },
+      { error: 'เกิดข้อผิดพลาดในการอัปเดต session' },
       { status: 500 }
     )
   }
@@ -193,7 +199,8 @@ export async function GET(request: NextRequest) {
           durationInSeconds: session.totalDuration,
           trackingLogsCount: session._count.trackingLogs,
           hasStatistics: !!session.statistics,
-          isActive: !session.endTime
+          status: session.status,
+          isActive: session.status === 'IN_PROGRESS' && !session.endTime
         }))
       }
     })
@@ -207,7 +214,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// ลบ tracking session (เมื่อผู้ใช้ยกเลิกการสอบ หรือปิดแท็บโดยไม่ได้บันทึก)
+// ลบ tracking session (หรือเปลี่ยนสถานะเป็น INTERRUPTED กรณีถูกเรียกเพื่อยกเลิก/หยุดกลางคัน)
 export async function DELETE(request: NextRequest) {
   try {
     // ตรวจสอบ authentication
@@ -228,6 +235,7 @@ export async function DELETE(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const sessionId = searchParams.get('sessionId')
+    const markInterrupted = searchParams.get('markInterrupted') === 'true'
 
     if (!sessionId) {
       return NextResponse.json({ error: 'กรุณาระบุ sessionId' }, { status: 400 })
@@ -245,6 +253,28 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'ไม่พบ session หรือไม่มีสิทธิ์เข้าถึง' }, { status: 404 })
     }
 
+    if (markInterrupted) {
+      // เปลี่ยนสถานะเป็น INTERRUPTED แทนการลบ
+      const endTime = getThailandTime()
+      const totalDuration = calculateDurationInSeconds(existingSession.startTime, endTime)
+
+      const updatedSession = await prisma.trackingSession.update({
+        where: { id: sessionId },
+        data: {
+          endTime: endTime,
+          totalDuration: totalDuration,
+          status: 'INTERRUPTED'
+        }
+      })
+
+      console.log(`⚠️ เปลี่ยนสถานะ session เป็น INTERRUPTED (หยุดกลางคัน): ${sessionId}`)
+      return NextResponse.json({
+        success: true,
+        message: 'เปลี่ยนสถานะเป็นหยุดการบันทึกกลางคันสำเร็จ',
+        data: updatedSession
+      })
+    }
+
     // ลบ session (จะลบ tracking logs และ stats ที่เกี่ยวข้องด้วยแบบ cascade)
     await prisma.trackingSession.delete({
       where: { id: sessionId }
@@ -258,9 +288,9 @@ export async function DELETE(request: NextRequest) {
     })
 
   } catch (error) {
-    console.error('❌ เกิดข้อผิดพลาดในการลบ session:', error)
+    console.error('❌ เกิดข้อผิดพลาดในการลบ/อัปเดต session:', error)
     return NextResponse.json(
-      { error: 'เกิดข้อผิดพลาดในการลบ session' },
+      { error: 'เกิดข้อผิดพลาดในการจัดการ session' },
       { status: 500 }
     )
   }

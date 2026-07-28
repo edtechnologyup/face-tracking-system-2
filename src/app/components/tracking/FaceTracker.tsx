@@ -292,8 +292,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
   }, [sessionName])
 
-  // ฟังก์ชันจบ tracking session
-  const endTrackingSession = useCallback(async (sessionId: string) => {
+  // ฟังก์ชันอัปเดตสถานะ tracking session
+  const endTrackingSession = useCallback(async (sessionId: string, status: 'COMPLETED' | 'INTERRUPTED' = 'COMPLETED') => {
     try {
       const token = localStorage.getItem('token')
       if (!token) {
@@ -307,23 +307,38 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          sessionId: sessionId
+          sessionId: sessionId,
+          status: status
         })
       })
 
       const result = await response.json()
       
       if (!response.ok) {
-        throw new Error(result.error || 'ไม่สามารถจบ session ได้')
+        throw new Error(result.error || 'ไม่สามารถอัปเดต session ได้')
       }
 
-      console.log('✅ จบ tracking session สำเร็จ:', result.data)
+      console.log(`✅ อัปเดต tracking session สำเร็จ (${status}):`, result.data)
       return result.data
     } catch (error) {
-      console.error('❌ เกิดข้อผิดพลาดในการจบ session:', error)
+      console.error('❌ เกิดข้อผิดพลาดในการอัปเดต session:', error)
       setApiError(error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ')
       return null
     }
+  }, [])
+
+  // ฟังก์ชันแจ้งระบบว่า session ถูกหยุดกลางคัน (เมื่อปิดหน้าจอ/ย้ายหน้าโดยไม่บันทึก)
+  const markSessionInterrupted = useCallback((sessionId: string) => {
+    const token = localStorage.getItem('token')
+    if (!token) return
+
+    fetch(`/api/tracking/sessions?sessionId=${sessionId}&markInterrupted=true`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      keepalive: true
+    }).catch(err => console.error('Error marking session as interrupted:', err))
   }, [])
 
   // เริ่มการติดตาม และบันทึกข้อมูลอัตโนมัติ
@@ -463,8 +478,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       
       if (saveResult) {
         isSessionSavedRef.current = true
-        // จบ tracking session
-        await endTrackingSession(currentSessionId)
+        // จบ tracking session สถานะสำเร็จ
+        await endTrackingSession(currentSessionId, 'COMPLETED')
         // ล้าง session reference และ flags เพื่อป้องกันการใช้ซ้ำ
         sessionIdRef.current = null
         sessionCreationInProgress.current = false
@@ -478,6 +493,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         }
         toast(`บันทึกข้อมูลสำเร็จ! 🎉\n\nสรุปผลลัพธ์:\n• หันซ้าย: ${statsData?.leftTurns?.count || 0} ครั้ง (${statsData?.leftTurns?.totalDuration || 0} วิ)\n• หันขวา: ${statsData?.rightTurns?.count || 0} ครั้ง (${statsData?.rightTurns?.totalDuration || 0} วิ)\n• ก้มหน้า: ${statsData?.lookingDown?.count || 0} ครั้ง (${statsData?.lookingDown?.totalDuration || 0} วิ)\n• เงยหน้า: ${statsData?.lookingUp?.count || 0} ครั้ง (${statsData?.lookingUp?.totalDuration || 0} วิ)\n• รวม events: ${statsData?.totalEvents || 0} ครั้ง\n🚨 ไม่พบใบหน้า: ${faceDetectionLossStats?.lossCount || 0} ครั้ง (รวม ${faceDetectionLossStats?.totalLossTime || 0} วิ)\n\n✅ ข้อมูลถูกบันทึกลงฐานข้อมูลแล้ว`)
       } else {
+        // บันทึกไม่สำเร็จ -> อัปเดตสถานะเป็น INTERRUPTED (หยุดการบันทึกกลางคัน)
+        await endTrackingSession(currentSessionId, 'INTERRUPTED')
+        sessionIdRef.current = null
+        sessionCreationInProgress.current = false
+
         const statsData = stats as {
           leftTurns: { count: number; totalDuration: number };
           rightTurns: { count: number; totalDuration: number };
@@ -485,10 +505,15 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           lookingUp: { count: number; totalDuration: number };
           totalEvents: number;
         }
-        alert(`เกิดข้อผิดพลาดในการบันทึก! ⚠️\n\nสรุปผลลัพธ์:\n• หันซ้าย: ${statsData?.leftTurns?.count || 0} ครั้ง (${statsData?.leftTurns?.totalDuration || 0} วิ)\n• หันขวา: ${statsData?.rightTurns?.count || 0} ครั้ง (${statsData?.rightTurns?.totalDuration || 0} วิ)\n• ก้มหน้า: ${statsData?.lookingDown?.count || 0} ครั้ง (${statsData?.lookingDown?.totalDuration || 0} วิ)\n• เงยหน้า: ${statsData?.lookingUp?.count || 0} ครั้ง (${statsData?.lookingUp?.totalDuration || 0} วิ)\n• รวม events: ${statsData?.totalEvents || 0} ครั้ง\n\n❌ ไม่สามารถบันทึกลงฐานข้อมูลได้`)
+        alert(`เกิดข้อผิดพลาดในการบันทึก! ⚠️\n\nสรุปผลลัพธ์:\n• หันซ้าย: ${statsData?.leftTurns?.count || 0} ครั้ง (${statsData?.leftTurns?.totalDuration || 0} วิ)\n• หันขวา: ${statsData?.rightTurns?.count || 0} ครั้ง (${statsData?.rightTurns?.totalDuration || 0} วิ)\n• ก้มหน้า: ${statsData?.lookingDown?.count || 0} ครั้ง (${statsData?.lookingDown?.totalDuration || 0} วิ)\n• เงยหน้า: ${statsData?.lookingUp?.count || 0} ครั้ง (${statsData?.lookingUp?.totalDuration || 0} วิ)\n• รวม events: ${statsData?.totalEvents || 0} ครั้ง\n\n⚠️ สถานะถูกเปลี่ยนเป็น "หยุดการบันทึกกลางคัน"`)
       }
       setIsLoading(false)
     } else {
+      if (currentSessionId) {
+        await endTrackingSession(currentSessionId, 'INTERRUPTED')
+        sessionIdRef.current = null
+        sessionCreationInProgress.current = false
+      }
       const statsData = stats as {
         leftTurns: { count: number; totalDuration: number };
         rightTurns: { count: number; totalDuration: number };
@@ -496,7 +521,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         lookingUp: { count: number; totalDuration: number };
         totalEvents: number;
       }
-      alert(`หยุดติดตามแล้ว!\n\nสรุปผลลัพธ์:\n• หันซ้าย: ${statsData?.leftTurns?.count || 0} ครั้ง (${statsData?.leftTurns?.totalDuration || 0} วิ)\n• หันขวา: ${statsData?.rightTurns?.count || 0} ครั้ง (${statsData?.rightTurns?.totalDuration || 0} วิ)\n• ก้มหน้า: ${statsData?.lookingDown?.count || 0} ครั้ง (${statsData?.lookingDown?.totalDuration || 0} วิ)\n• เงยหน้า: ${statsData?.lookingUp?.count || 0} ครั้ง (${statsData?.lookingUp?.totalDuration || 0} วิ)\n• รวม events: ${statsData?.totalEvents || 0} ครั้ง`)
+      alert(`หยุดติดตามแล้ว!\n\nสรุปผลลัพธ์:\n• หันซ้าย: ${statsData?.leftTurns?.count || 0} ครั้ง (${statsData?.leftTurns?.totalDuration || 0} วิ)\n• หันขวา: ${statsData?.rightTurns?.count || 0} ครั้ง (${statsData?.rightTurns?.totalDuration || 0} วิ)\n• ก้มหน้า: ${statsData?.lookingDown?.count || 0} ครั้ง (${statsData?.lookingDown?.totalDuration || 0} วิ)\n• เงยหน้า: ${statsData?.lookingUp?.count || 0} ครั้ง (${statsData?.lookingUp?.totalDuration || 0} วิ)\n• รวม events: ${statsData?.totalEvents || 0} ครั้ง\n\n⚠️ สถานะถูกเปลี่ยนเป็น "หยุดการบันทึกกลางคัน"`)
     }
   }, [stopRecording, getCurrentStats, currentSessionId, saveOrientationData, endTrackingSession, getFaceDetectionLossStats, getFaceDetectionLossEvents, recordFaceMismatchEvent])
 
@@ -505,6 +530,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     // หยุดบันทึกก่อน (ถ้ากำลังบันทึกอยู่)
     if (isRecording) {
       handleStopRecording()
+    } else if (currentSessionId && !isSessionSavedRef.current) {
+      endTrackingSession(currentSessionId, 'INTERRUPTED')
     }
     
     stopDetection()
@@ -513,7 +540,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     sessionIdRef.current = null
     sessionCreationInProgress.current = false
     onTrackingStop()
-  }, [stopDetection, stopCamera, onTrackingStop, isRecording, handleStopRecording])
+  }, [stopDetection, stopCamera, onTrackingStop, isRecording, handleStopRecording, currentSessionId, endTrackingSession])
 
   // ดักจับการปิดแท็บ คืนค่า หรือปิดหน้าต่างเบราว์เซอร์
   useEffect(() => {
@@ -522,17 +549,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       const isSaved = isSessionSavedRef.current
       
       if (sessionId && !isSaved) {
-        const token = localStorage.getItem('token')
-        if (token) {
-          // ใช้ keepalive: true เพื่อให้บราวเซอร์ส่ง DELETE request ไปลบ session ให้สำเร็จแม้ปิดแท็บ
-          fetch(`/api/tracking/sessions?sessionId=${sessionId}`, {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${token}`
-            },
-            keepalive: true
-          })
-        }
+        markSessionInterrupted(sessionId)
       }
     }
 
@@ -540,7 +557,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [])
+  }, [markSessionInterrupted])
 
   // Cleanup เมื่อ component unmount (เช่น ย้ายหน้า, ออกจากหน้าตรวจจับ)
   useEffect(() => {
@@ -550,26 +567,17 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       const sessionId = sessionIdRef.current
       const isSaved = isSessionSavedRef.current
       
-      // ถ้ายกเลิก/ออกจากหน้านี้โดยที่ไม่ได้กดยกเลิกแบบกดเซฟ ให้ลบเซสชันใน db ด้วย
+      // ถ้ายกเลิก/ออกจากหน้านี้โดยที่ไม่ได้กดยกเลิกแบบกดเซฟ ให้เปลี่ยนสถานะเป็น INTERRUPTED
       if (sessionId && !isSaved) {
-        console.log('🗑️ Discarding unsaved tracking session on unmount:', sessionId)
-        const token = localStorage.getItem('token')
-        if (token) {
-          fetch(`/api/tracking/sessions?sessionId=${sessionId}`, {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${token}`
-            },
-            keepalive: true
-          }).catch(err => console.error('Error discarding session:', err))
-        }
+        console.log('⚠️ Marking tracking session as INTERRUPTED on unmount:', sessionId)
+        markSessionInterrupted(sessionId)
       }
       
       // ล้าง session reference และ flags เมื่อ component ถูก unmount
       sessionIdRef.current = null
       sessionCreationInProgress.current = false
     }
-  }, [stopCamera])
+  }, [stopCamera, markSessionInterrupted])
 
   // Auto-start tracking when component mounts (เพียงครั้งเดียว)
   const hasAutoStarted = useRef(false)
