@@ -694,7 +694,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         </div>
 
         {/* Current Detection Status */}
-        <DetectionStats data={currentData} isActive={isActive} />
+        <DetectionStats data={currentData} isActive={isActive} isMismatchDetected={isMismatchDetected} />
 
         {/* API Error Display */}
         {apiError && (
