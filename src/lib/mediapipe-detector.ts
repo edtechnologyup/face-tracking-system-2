@@ -459,8 +459,8 @@ export class MediaPipeDetector {
     let pitch = pitchDeviation * 90; 
     pitch = Math.max(-30, Math.min(30, pitch)); // จำกัด range ±30°
 
-    // ตรวจสอบการหันออกจากจอ
-    const isLookingAway = Math.abs(yaw) > this.YAW_THRESHOLD || Math.abs(pitch) > this.PITCH_THRESHOLD;
+    // ตรวจสอบการหันออกจากจอ (เงยหน้าเมื่อ pitch <= -5, ก้มหน้าเมื่อ pitch >= PITCH_THRESHOLD)
+    const isLookingAway = Math.abs(yaw) > this.YAW_THRESHOLD || pitch <= -5 || pitch >= this.PITCH_THRESHOLD;
 
     // Debug logging ที่ละเอียดยิ่งขึ้น
     console.log(`🎯 Face Orientation Debug:`);
@@ -555,9 +555,13 @@ export class MediaPipeDetector {
       return yaw > 0 ? 'RIGHT' : 'LEFT';
     }
     
-    // ตรวจสอบ pitch (ก้มหน้า-เงยหน้า)
-    if (Math.abs(pitch) > this.PITCH_THRESHOLD) {
-      return pitch > 0 ? 'DOWN' : 'UP';
+    // ตรวจสอบ pitch (เงยหน้าเมื่อ pitch <= -5, ก้มหน้าเมื่อ pitch >= PITCH_THRESHOLD)
+    if (pitch <= -5) {
+      return 'UP';
+    }
+
+    if (pitch >= this.PITCH_THRESHOLD) {
+      return 'DOWN';
     }
     
     return 'CENTER';
