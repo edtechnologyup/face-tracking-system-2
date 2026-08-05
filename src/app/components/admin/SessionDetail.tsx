@@ -123,10 +123,29 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
       'UP': 'bg-purple-100 text-purple-800',
       'DOWN': 'bg-yellow-100 text-yellow-800',
       'LEFT': 'bg-orange-100 text-orange-800', 
-      'RIGHT': 'bg-pink-100 text-pink-800',
-      'FORWARD': 'bg-green-100 text-green-800'
+      'RIGHT': 'bg-green-100 text-green-800',
+      'FORWARD': 'bg-blue-100 text-blue-800'
     }
     return colors[direction] || 'bg-gray-100 text-gray-800'
+  }
+
+  const getCalculatedDuration = (data?: Record<string, unknown>) => {
+    if (!data) return 0
+    if (typeof data.duration === 'number' && data.duration > 0) {
+      return data.duration
+    }
+    const startTimeStr = data.startTime as string
+    const endTimeStr = data.endTime as string
+    if (startTimeStr && endTimeStr) {
+      const [sH, sM, sS] = startTimeStr.split(':').map(Number)
+      const [eH, eM, eS] = endTimeStr.split(':').map(Number)
+      if (!isNaN(sH) && !isNaN(eH)) {
+        const startMs = (sH * 3600 + sM * 60 + sS) * 1000
+        const endMs = (eH * 3600 + eM * 60 + eS) * 1000
+        return Math.max(0, Math.round((endMs - startMs) / 1000))
+      }
+    }
+    return typeof data.duration === 'number' ? data.duration : 0
   }
 
   if (loading) {
@@ -312,13 +331,11 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
                           {(log.detectionData.startTime as string) && (log.detectionData.endTime as string) && (
                             <div>เวลา: {log.detectionData.startTime as string} - {log.detectionData.endTime as string}</div>
                           )}
-                          {(log.detectionData.duration as number) && (
-                            <div>ระยะเวลา: {log.detectionData.duration as number}s</div>
-                          )}
-                          {(log.detectionData.maxYaw as number) && (
+                          <div>ระยะเวลา: {getCalculatedDuration(log.detectionData as Record<string, unknown>)}s</div>
+                          {(log.detectionData.maxYaw as number) !== undefined && log.detectionData.maxYaw !== null && (
                             <div>Yaw: {(log.detectionData.maxYaw as number).toFixed(1)}°</div>
                           )}
-                          {(log.detectionData.maxPitch as number) && (
+                          {(log.detectionData.maxPitch as number) !== undefined && log.detectionData.maxPitch !== null && (
                             <div>Pitch: {(log.detectionData.maxPitch as number).toFixed(1)}°</div>
                           )}
                         </div>
