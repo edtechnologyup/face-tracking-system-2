@@ -8,6 +8,7 @@ import { DashboardStats } from '@/app/components/admin/DashboardStats'
 import { UsersTable } from '@/app/components/admin/UsersTable'
 import { SessionsList } from '@/app/components/admin/SessionsList'
 import { SessionDetail } from '@/app/components/admin/SessionDetail'
+import { EngineComparison } from '@/app/components/tracking/EngineComparison'
 
 interface User {
   id: string
@@ -294,6 +295,11 @@ export default function AdminDashboard() {
             onBackClick={handleBackToSessions}
           />
         )}
+
+        {/* Engine Benchmark Comparison Page */}
+        {currentPage === 'comparison' && (
+          <EngineComparison />
+        )}
         </div>
       </div>
 
@@ -317,6 +323,7 @@ function getCurrentPageTitle(page: string, isSessionSelected: boolean = false): 
     'overview': 'Dashboard Overview',
     'users': 'User Management',
     'sessions': 'Tracking Sessions',
+    'comparison': 'Face Detection Engines Benchmark (4-Tools)',
   }
   return titles[page] || 'Admin Dashboard'
 }
@@ -328,7 +335,8 @@ function getCurrentPageDescription(page: string, isSessionSelected: boolean = fa
   const descriptions: Record<string, string> = {
     'overview': 'ภาพรวมสถิติและข้อมูลระบบ',
     'users': 'จัดการผู้ใช้งานและสิทธิ์เข้าถึง',
-    'sessions': 'ติดตามเซสชันและสถิติการใช้งาน',
+    'sessions': 'รายการเซสชันการตรวจจับใบหน้าทั้งหมด',
+    'comparison': 'ทดสอบและเปรียบเทียบประสิทธิภาพแบบเรียลไทม์ระหว่าง MediaPipe, YOLOv8-Face, Dlib และ OpenFace',
   }
   return descriptions[page] || 'ระบบจัดการสำหรับผู้ดูแลระบบ'
 }
