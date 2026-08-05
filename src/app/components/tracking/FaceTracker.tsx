@@ -43,6 +43,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     getCurrentStats,
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
+    getOrientationHistory,
     recordFaceMismatchEvent
   } = useFaceDetection()
 
@@ -524,12 +525,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   }, [stopRecording, getCurrentStats, currentSessionId, saveOrientationData, endTrackingSession, getFaceDetectionLossStats, getFaceDetectionLossEvents, recordFaceMismatchEvent])
 
   // หยุดการติดตาม
-  const stopTracking = useCallback(() => {
+  const stopTracking = useCallback(async () => {
     // หยุดบันทึกก่อน (ถ้ากำลังบันทึกอยู่)
     if (isRecording) {
-      handleStopRecording()
+      await handleStopRecording()
     } else if (currentSessionId && !isSessionSavedRef.current) {
-      endTrackingSession(currentSessionId, 'INTERRUPTED')
+      await endTrackingSession(currentSessionId, 'INTERRUPTED')
     }
     
     stopDetection()
@@ -636,12 +637,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
         if (sessionId && !isSaved && token) {
           const stats = getCurrentStats()
-          const events = getCurrentStats() ? (stats as unknown as { events?: unknown[] }).events || [] : []
+          const events = getOrientationHistory()
           const faceLossStats = getFaceDetectionLossStats()
           const faceLossEvents = getFaceDetectionLossEvents()
 
-          if (stats) {
-            saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, false)
+          if (stats && events.length > 0) {
+            saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true)
               .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
               .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
           }
@@ -652,24 +653,20 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     return () => {
       if (syncInterval) clearInterval(syncInterval)
     }
-  }, [isActive, isRecording, currentSessionId, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents, saveOrientationData])
+  }, [isActive, isRecording, currentSessionId, getCurrentStats, getOrientationHistory, getFaceDetectionLossStats, getFaceDetectionLossEvents, saveOrientationData])
 
-  // 🛡️ ดักจับทุกเหตุการณ์ปิดแท็บ, ย้ายหน้า, ย่อเบราว์เซอร์, ซ่อนแอป (beforeunload, pagehide, visibilitychange)
+  // 🛡️ ดักจับเหตุการณ์ปิดแท็บ, ย้ายหน้า, ซ่อนแอป (beforeunload, pagehide)
   useEffect(() => {
     const handleUnloadEvents = () => {
       flushSessionData('DISCONNECTED', true)
     }
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        flushSessionData('IN_PROGRESS', true)
-      }
-    }
+    window.addEventListener('beforeunload', handleUnloadEvents)
+    window.addEventListener('pagehide', handleUnloadEvents)
 
     return () => {
       window.removeEventListener('beforeunload', handleUnloadEvents)
       window.removeEventListener('pagehide', handleUnloadEvents)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [flushSessionData])
 

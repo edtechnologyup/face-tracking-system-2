@@ -56,46 +56,52 @@ export async function GET(request: NextRequest) {
       prisma.trackingSession.count({ where: { status: 'DISCONNECTED' } })
     ])
 
-    // ใช้ raw SQL เพื่อ aggregate ข้อมูลพฤติกรรมบน database แทนดึงทั้งหมดมา JS
-    const orientationAgg = await prisma.$queryRaw<
-      Array<{ direction: string; count: bigint; total_time: number }>
-    >`
-      SELECT 
-        "detectionData"->>'direction' as direction,
-        COUNT(*)::bigint as count,
-        COALESCE(SUM(
-          CASE 
-            WHEN jsonb_typeof("detectionData"->'duration') = 'number' 
-              THEN ("detectionData"->>'duration')::double precision
-            WHEN jsonb_typeof("detectionData"->'duration') = 'string' 
-              THEN ("detectionData"->>'duration')::double precision
-            ELSE 0
-          END
-        ), 0) as total_time
-      FROM "TrackingLog"
-      WHERE "detectionType" = 'FACE_ORIENTATION'
-        AND "detectionData"->>'direction' IS NOT NULL
-      GROUP BY "detectionData"->>'direction'
-    `
+    // ใช้ raw SQL ที่อ้างอิงชื่อตารางถูกต้อง ("tracking_logs") เพื่อ aggregate ข้อมูลพฤติกรรมบน database
+    let orientationAgg: Array<{ direction: string; count: number; total_time: number }> = []
+    let faceLossAgg: Array<{ count: number; total_time: number }> = []
 
-    // นับจำนวนและรวมเวลาสำหรับ FACE_DETECTION_LOSS logs
-    const faceLossAgg = await prisma.$queryRaw<
-      Array<{ count: bigint; total_time: number }>
-    >`
-      SELECT 
-        COUNT(*)::bigint as count,
-        COALESCE(SUM(
-          CASE 
-            WHEN jsonb_typeof("detectionData"->'duration') = 'number' 
-              THEN ("detectionData"->>'duration')::double precision
-            WHEN jsonb_typeof("detectionData"->'duration') = 'string' 
-              THEN ("detectionData"->>'duration')::double precision
-            ELSE 0
-          END
-        ), 0) as total_time
-      FROM "TrackingLog"
-      WHERE "detectionType" = 'FACE_DETECTION_LOSS'
-    `
+    try {
+      orientationAgg = await prisma.$queryRaw<
+        Array<{ direction: string; count: number; total_time: number }>
+      >`
+        SELECT 
+          "detectionData"->>'direction' as direction,
+          COUNT(*)::integer as count,
+          COALESCE(SUM(
+            CASE 
+              WHEN jsonb_typeof("detectionData"->'duration') = 'number' 
+                THEN ("detectionData"->>'duration')::double precision
+              WHEN jsonb_typeof("detectionData"->'duration') = 'string' 
+                THEN ("detectionData"->>'duration')::double precision
+              ELSE 0
+            END
+          ), 0)::double precision as total_time
+        FROM "tracking_logs"
+        WHERE "detectionType" = 'FACE_ORIENTATION'
+          AND "detectionData"->>'direction' IS NOT NULL
+        GROUP BY "detectionData"->>'direction'
+      `
+
+      faceLossAgg = await prisma.$queryRaw<
+        Array<{ count: number; total_time: number }>
+      >`
+        SELECT 
+          COUNT(*)::integer as count,
+          COALESCE(SUM(
+            CASE 
+              WHEN jsonb_typeof("detectionData"->'duration') = 'number' 
+                THEN ("detectionData"->>'duration')::double precision
+              WHEN jsonb_typeof("detectionData"->'duration') = 'string' 
+                THEN ("detectionData"->>'duration')::double precision
+              ELSE 0
+            END
+          ), 0)::double precision as total_time
+        FROM "tracking_logs"
+        WHERE "detectionType" = 'FACE_DETECTION_LOSS'
+      `
+    } catch (sqlError) {
+      console.error('SQL aggregation warning:', sqlError)
+    }
 
     // แปลงผลลัพธ์จาก DB aggregation เป็น behaviorCounts
     const behaviorCounts = {
@@ -107,8 +113,8 @@ export async function GET(request: NextRequest) {
     }
 
     for (const row of orientationAgg) {
-      const count = Number(row.count)
-      const totalTime = row.total_time || 0
+      const count = Number(row.count) || 0
+      const totalTime = Number(row.total_time) || 0
 
       switch (row.direction) {
         case 'LEFT':
@@ -135,8 +141,8 @@ export async function GET(request: NextRequest) {
     }
 
     if (faceLossAgg.length > 0) {
-      behaviorCounts.faceLoss.count = Number(faceLossAgg[0].count)
-      behaviorCounts.faceLoss.totalTime = faceLossAgg[0].total_time || 0
+      behaviorCounts.faceLoss.count = Number(faceLossAgg[0].count) || 0
+      behaviorCounts.faceLoss.totalTime = Number(faceLossAgg[0].total_time) || 0
     }
 
     // เตรียมข้อมูลกราฟ
