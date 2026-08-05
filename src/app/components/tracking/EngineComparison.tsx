@@ -339,10 +339,10 @@ export function EngineComparison() {
             <tbody className="divide-y divide-gray-200">
               <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">ความเร็ว (FPS)</td>
-                <td className="px-4 py-3 font-bold text-green-600 bg-green-50/30">{results.mediapipe.fps} FPS ⚡⚡⚡⚡</td>
-                <td className="px-4 py-3 font-bold text-blue-600 bg-blue-50/30">{results.yolov8.fps} FPS ⚡⚡⚡⚡</td>
-                <td className="px-4 py-3 text-amber-700 bg-amber-50/30">{results.dlib.fps} FPS ⚡⚡</td>
-                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">{results.openface.fps} FPS ⚡</td>
+                <td className="px-4 py-3 font-bold text-green-600 bg-green-50/30">{results.mediapipe.fps} FPS</td>
+                <td className="px-4 py-3 font-bold text-blue-600 bg-blue-50/30">{results.yolov8.fps} FPS</td>
+                <td className="px-4 py-3 text-amber-700 bg-amber-50/30">{results.dlib.fps} FPS</td>
+                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">{results.openface.fps} FPS</td>
               </tr>
               <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">เวลาประมวลผล (Latency)</td>
