@@ -124,14 +124,20 @@ export async function POST(request: NextRequest) {
       console.log(`🚨 ตรวจพบ Face Detection Loss: ${lossLogsCount} events, รวม ${faceDetectionLoss?.totalLossTime || 0} วินาที`)
     }
 
-    // 3. ทำการบันทึกแบบสร้างข้อมูลหลายแถว (Bulk Insert) ในครั้งเดียว เพื่อป้องกันการโหลดช้า
+    // 3. ทำการบันทึกข้อมูลอย่างถูกต้อง (ลบ log เก่าของ session เพื่อกันข้อมูลซ้ำจากการ auto-sync แล้วลง log ชุดใหม่ล่าสุด)
     let logsCreated = 0
-    if (logsData.length > 0) {
-      const batchResult = await prisma.trackingLog.createMany({
-        data: logsData
+    await prisma.$transaction(async (tx) => {
+      await tx.trackingLog.deleteMany({
+        where: { sessionId: sessionId }
       })
-      logsCreated = batchResult.count
-    }
+
+      if (logsData.length > 0) {
+        const batchResult = await tx.trackingLog.createMany({
+          data: logsData
+        })
+        logsCreated = batchResult.count
+      }
+    })
 
     // อัปเดตหรือสร้าง SessionStatistics
     const existingStats = await prisma.sessionStatistics.findUnique({
