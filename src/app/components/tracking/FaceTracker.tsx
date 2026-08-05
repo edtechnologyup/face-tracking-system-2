@@ -331,20 +331,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
   }, [])
 
-  // ฟังก์ชันแจ้งระบบว่า session ถูกหยุดกลางคัน (เมื่อปิดหน้าจอ/ย้ายหน้าโดยไม่บันทึก)
-  const markSessionInterrupted = useCallback((sessionId: string) => {
-    const token = localStorage.getItem('token')
-    if (!token) return
-
-    fetch(`/api/tracking/sessions?sessionId=${sessionId}&markInterrupted=true`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      keepalive: true
-    }).catch(err => console.error('Error marking session as interrupted:', err))
-  }, [])
-
   // เริ่มการติดตาม และบันทึกข้อมูลอัตโนมัติ
   const startTracking = useCallback(async () => {
     try {

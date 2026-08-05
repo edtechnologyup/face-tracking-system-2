@@ -9,7 +9,6 @@ import { LoadingIndicator } from './face-login/LoadingIndicator'
 
 interface FaceLoginProps {
   isOpen: boolean
-  userId: string
   onSuccess: () => void
   onCancel: () => void
 }
@@ -35,7 +34,7 @@ const AVAILABLE_POSES: PoseData[] = [
   { type: 'right', title: 'หันขวา', instruction: 'หันหน้าไปทางขวา 30 องศา', icon: '👉' }
 ]
 
-export function FaceLogin({ isOpen, userId, onSuccess, onCancel }: FaceLoginProps) {
+export function FaceLogin({ isOpen, onSuccess, onCancel }: FaceLoginProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const poseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -325,7 +324,7 @@ export function FaceLogin({ isOpen, userId, onSuccess, onCancel }: FaceLoginProp
     } finally {
       setLoading(false)
     }
-  }, [userId, selectedPose, onSuccess])
+  }, [selectedPose, onSuccess])
 
   const handleAutoVerify = useCallback(async () => {
     if (!videoRef.current || isVerifyingPose || autoVerifying || !selectedPose) return

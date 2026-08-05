@@ -51,6 +51,7 @@ export default function LoginPage() {
           }, 1500)
         } else {
           // ผู้ใช้ทั่วไป - ต้องยืนยันตัวตนด้วยใบหน้า
+          localStorage.setItem('token', result.token)
           setCurrentUser(result.user)
           setCurrentToken(result.token)
           setShowFaceVerification(true)
@@ -124,7 +125,6 @@ export default function LoginPage() {
 
       <FaceLogin
         isOpen={showFaceVerification}
-        userId={currentUser?.id || ''}
         onSuccess={handleFaceVerificationSuccess}
         onCancel={handleFaceVerificationCancel}
       />
