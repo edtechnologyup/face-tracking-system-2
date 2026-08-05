@@ -170,8 +170,8 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // เกณฑ์การจับคู่ใบหน้า
-    const threshold = 0.4
+    // เกณฑ์การจับคู่ใบหน้า (0.50 สำหรับ webcam/background check เพื่อป้องกัน false rejection, 0.45 สำหรับ multi-pose)
+    const threshold = singlePoseVerification ? 0.50 : 0.45
     
     // เพิ่มการตรวจสอบเพิ่มเติม - ต้องมีการตรงกับหลายท่า
     const validMatches = distances.filter(d => d.distance < threshold)

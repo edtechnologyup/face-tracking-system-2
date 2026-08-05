@@ -72,8 +72,14 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   const performFaceVerification = useCallback(async () => {
     if (!videoRef.current || !isFaceApiLoaded) return
 
-    // หากขณะนี้ผู้สอบหันหน้าไปทางอื่น (ไม่ใช่ CENTER) ให้ข้ามการตรวจสวมสิทธิ์เพื่อป้องกัน false positive
+    // 1. หากขณะนี้ผู้สอบหันหน้าไปทางอื่น (ไม่ใช่ CENTER) ให้ข้ามการตรวจสวมสิทธิ์เพื่อป้องกัน false positive
     if (currentData?.orientation && currentData.orientation.direction !== 'CENTER') {
+      return
+    }
+
+    // 2. หากขณะนี้ตรวจไม่พบใบหน้า ให้รีเซ็ต counter และข้ามการตรวจสอบ
+    if (!currentData?.isDetected) {
+      consecutiveMismatches.current = 0
       return
     }
 
@@ -84,7 +90,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         return
       }
 
-      const descriptor = await detectFaceAndGetDescriptor(videoRef.current, true)
+      // ดึง face descriptor โดยทำการ validate ความชัดของใบหน้าเบื้องต้น (skipValidation = false)
+      const descriptor = await detectFaceAndGetDescriptor(videoRef.current, false)
       if (!descriptor || descriptor.length !== 128) {
         consecutiveMismatches.current = 0
         return
@@ -127,11 +134,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
             }
           }
         } else {
-          // ถ้าใบหน้าไม่ตรงกัน (ต้องไม่ตรงกันต่อเนื่องอย่างน้อย 3 ครั้งที่มองตรง CENTER)
+          // ถ้าใบหน้าไม่ตรงกัน (ต้องมองตรง CENTER ชัดเจน และไม่ตรงกันต่อเนื่องอย่างน้อย 4 ครั้ง)
           consecutiveMismatches.current += 1
           console.warn(`🔒 [Security System] ⚠️ ตรวจพบใบหน้าไม่ตรงกับผู้สอบ! ครั้งที่ ${consecutiveMismatches.current}`)
           
-          if (consecutiveMismatches.current >= 3) {
+          if (consecutiveMismatches.current >= 4) {
             if (!isMismatchDetected) {
               console.warn('🔒 [Security System] 🚨 ยืนยันพบการสวมสิทธิ์สอบ! บันทึกช่วงเวลาสวมสิทธิ์ในฐานข้อมูล')
               setIsMismatchDetected(true)
@@ -141,7 +148,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         }
       }
     } catch {
-      // หากเกิด error เช่น ไม่พบใบหน้า ให้รีเซ็ต counter และข้ามไป ไม่นับเป็น mismatch
+      // หากเกิด error เช่น ไม่พบใบหน้า หรือแสงไม่เพียงพอ ให้รีเซ็ต counter
       consecutiveMismatches.current = 0
     }
   }, [videoRef, isFaceApiLoaded, currentData, isMismatchDetected, recordFaceMismatchEvent])
