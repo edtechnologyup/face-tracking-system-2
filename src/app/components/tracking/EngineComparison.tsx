@@ -322,8 +322,8 @@ export function EngineComparison() {
 
       {/* Benchmark Matrix Comparison Table */}
       <Card className="p-6 bg-white border border-gray-200 shadow-sm">
-        <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <span>📊 ตารางสรุปเปรียบเทียบประสิทธิภาพ 4 เครื่องมือ (Live Benchmark Matrix)</span>
+        <h3 className="text-lg font-bold text-gray-900 mb-4">
+          ตารางสรุปเปรียบเทียบประสิทธิภาพ 4 เครื่องมือ (Live Benchmark Matrix)
         </h3>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -353,55 +353,55 @@ export function EngineComparison() {
               </tr>
               <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">ความละเอียด จุด Landmarks</td>
-                <td className="px-4 py-3 text-green-700 bg-green-50/30">🟢 468 จุด (3D Mesh)</td>
-                <td className="px-4 py-3 text-blue-700 bg-blue-50/30">🔴 5 จุดหลัก (Box)</td>
-                <td className="px-4 py-3 text-amber-700 bg-amber-50/30">🟡 68 จุด (2D Standard)</td>
-                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">🟢 68+ จุด (Behavioral)</td>
+                <td className="px-4 py-3 text-green-700 bg-green-50/30">468 จุด (3D Mesh)</td>
+                <td className="px-4 py-3 text-blue-700 bg-blue-50/30">5 จุดหลัก (Box)</td>
+                <td className="px-4 py-3 text-amber-700 bg-amber-50/30">68 จุด (2D Standard)</td>
+                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">68+ จุด (Behavioral)</td>
               </tr>
               <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">การใช้ทรัพยากร (RAM & CPU)</td>
                 <td className="px-4 py-3 text-green-700 bg-green-50/30">
-                  <div className="font-bold">🟢 ต่ำมาก (Client Edge)</div>
+                  <div className="font-bold">ต่ำมาก (Client Edge)</div>
                   <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.mediapipe.memoryMb} MB</b> | CPU: <b>{results.mediapipe.cpuLoadPct}%</b></div>
                 </td>
                 <td className="px-4 py-3 text-blue-700 bg-blue-50/30">
-                  <div className="font-bold">🟡 ต่ำ-ปานกลาง (ONNX)</div>
+                  <div className="font-bold">ต่ำ-ปานกลาง (ONNX)</div>
                   <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.yolov8.memoryMb} MB</b> | CPU: <b>{results.yolov8.cpuLoadPct}%</b></div>
                 </td>
                 <td className="px-4 py-3 text-amber-700 bg-amber-50/30">
-                  <div className="font-bold">🟡 ปานกลาง (CPU-bound)</div>
+                  <div className="font-bold">ปานกลาง (CPU-bound)</div>
                   <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.dlib.memoryMb} MB</b> | CPU: <b>{results.dlib.cpuLoadPct}%</b></div>
                 </td>
                 <td className="px-4 py-3 text-purple-700 bg-purple-50/30">
-                  <div className="font-bold">🔴 สูงมาก (Server/GPU)</div>
+                  <div className="font-bold">สูงมาก (Server/GPU)</div>
                   <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.openface.memoryMb} MB</b> | CPU: <b>{results.openface.cpuLoadPct}%</b></div>
                 </td>
               </tr>
               <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">ความแม่นยำ (Real-Time Confidence)</td>
                 <td className="px-4 py-3 text-green-700 bg-green-50/30">
-                  <div className="font-bold text-green-600">🟢 {((results.mediapipe.data?.confidence || 0.985) * 100).toFixed(1)}%</div>
+                  <div className="font-bold text-green-600">{((results.mediapipe.data?.confidence || 0.985) * 100).toFixed(1)}%</div>
                   <div className="text-xs text-gray-500">WFLW NME: 2.3%</div>
                 </td>
                 <td className="px-4 py-3 text-blue-700 bg-blue-50/30">
-                  <div className="font-bold text-blue-600">🟢 {(results.yolov8.confidence * 100).toFixed(1)}%</div>
+                  <div className="font-bold text-blue-600">{(results.yolov8.confidence * 100).toFixed(1)}%</div>
                   <div className="text-xs text-gray-500">WIDER FACE mAP: 94.8%</div>
                 </td>
                 <td className="px-4 py-3 text-amber-700 bg-amber-50/30">
-                  <div className="font-bold text-amber-600">🟡 {(results.dlib.confidence * 100).toFixed(1)}%</div>
+                  <div className="font-bold text-amber-600">{(results.dlib.confidence * 100).toFixed(1)}%</div>
                   <div className="text-xs text-gray-500">300W NME: 5.4%</div>
                 </td>
                 <td className="px-4 py-3 text-purple-700 bg-purple-50/30">
-                  <div className="font-bold text-purple-600">🟢 {(results.openface.confidence * 100).toFixed(1)}%</div>
+                  <div className="font-bold text-purple-600">{(results.openface.confidence * 100).toFixed(1)}%</div>
                   <div className="text-xs text-gray-500">DISFA AU F1: 0.86</div>
                 </td>
               </tr>
               <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">ความลึกพฤติกรรม (Action Units)</td>
-                <td className="px-4 py-3 text-green-700 bg-green-50/30">🟡 ปานกลาง (Head Pose)</td>
-                <td className="px-4 py-3 text-blue-700 bg-blue-50/30">🔴 ไม่มี (เน้นตรวจจับกรอบ)</td>
-                <td className="px-4 py-3 text-amber-700 bg-amber-50/30">🔴 ไม่มี</td>
-                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">🟢 สูงสุด (สกัด 18+ AUs)</td>
+                <td className="px-4 py-3 text-green-700 bg-green-50/30">ปานกลาง (Head Pose)</td>
+                <td className="px-4 py-3 text-blue-700 bg-blue-50/30">ไม่มี (เน้นตรวจจับกรอบ)</td>
+                <td className="px-4 py-3 text-amber-700 bg-amber-50/30">ไม่มี</td>
+                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">สูงสุด (สกัด 18+ AUs)</td>
               </tr>
             </tbody>
           </table>
