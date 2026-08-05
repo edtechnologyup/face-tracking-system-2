@@ -132,7 +132,7 @@ export class MediaPipeDetector {
   
   // Thresholds for direction detection
   private readonly YAW_THRESHOLD = 25;
-  private readonly PITCH_THRESHOLD = 8;
+  private readonly PITCH_THRESHOLD = 16;
 
   async initialize(): Promise<boolean> {
     try {
@@ -455,9 +455,9 @@ export class MediaPipeDetector {
     // คำนวณส่วนเบี่ยงเบนจาก neutral position
     const pitchDeviation = noseRelativePosition - neutralNosePosition;
     
-    // แปลงเป็นองศาด้วย sensitivity ที่ตอบสนองรวดเร็วเป็นธรรมชาติ
-    let pitch = pitchDeviation * 140; 
-    pitch = Math.max(-35, Math.min(35, pitch)); // จำกัด range ±35°
+    // แปลงเป็นองศาด้วย sensitivity สมดุล ป้องกันการติดตรวจจับจากเพียงการขยับศีรษะเล็กน้อยขณะอ่านข้อสอบ
+    let pitch = pitchDeviation * 90; 
+    pitch = Math.max(-30, Math.min(30, pitch)); // จำกัด range ±30°
 
     // ตรวจสอบการหันออกจากจอ
     const isLookingAway = Math.abs(yaw) > this.YAW_THRESHOLD || Math.abs(pitch) > this.PITCH_THRESHOLD;
