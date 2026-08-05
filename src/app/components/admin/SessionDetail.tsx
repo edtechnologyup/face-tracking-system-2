@@ -20,7 +20,7 @@ interface SessionDetail {
     startTime: string
     endTime: string | null
     totalDuration: number | null
-    status?: 'IN_PROGRESS' | 'COMPLETED' | 'INTERRUPTED' | string
+    status?: string | null
     user: {
       firstName: string
       lastName: string
@@ -186,6 +186,16 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
             <p className="text-sm text-gray-600">กลุ่มเรียน (Section)</p>
             <p className="font-medium text-purple-700">
               {sessionDetail.session.user.section || 'ไม่มีกลุ่มเรียน'}
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-600">สถานะ</p>
+            <p className={`font-medium ${
+              sessionDetail.session.status === 'DISCONNECTED' ? 'text-red-600 font-semibold' :
+              sessionDetail.session.endTime ? 'text-gray-900' : 'text-green-600 animate-pulse'
+            }`}>
+              {sessionDetail.session.status === 'DISCONNECTED' ? 'ขาดการเชื่อมต่อระหว่างตรวจจับ' :
+               sessionDetail.session.endTime ? 'เสร็จสิ้น' : 'กำลังดำเนินการ'}
             </p>
           </div>
           <div>

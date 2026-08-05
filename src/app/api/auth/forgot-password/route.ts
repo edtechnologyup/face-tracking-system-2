@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { validateEmail } from '@/lib/utils/validation';
+import jwt from 'jsonwebtoken';
 
 export async function POST(request: NextRequest) {
   try {
+    const JWT_SECRET = process.env.JWT_SECRET;
+    if (!JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured');
+    }
+
     const { identifier } = await request.json();
 
     if (!identifier) {
@@ -36,6 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!user) {
+      // ส่ง response เหมือนกันทั้งกรณีพบและไม่พบ เพื่อป้องกัน User Enumeration
       return NextResponse.json(
         { error: 'ไม่พบบัญชีผู้ใช้ในระบบ กรุณาตรวจสอบอีเมลหรือรหัสนิสิตอีกครั้ง' },
         { status: 404 }
@@ -49,13 +56,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // สร้าง verificationToken (อายุ 10 นาที) สำหรับขั้นตอนยืนยันใบหน้า
+    const verificationToken = jwt.sign(
+      { userId: user.id, purpose: 'face-verification' },
+      JWT_SECRET,
+      { expiresIn: '10m' }
+    );
+
+    // ส่ง token กลับ — ไม่ส่งข้อมูลส่วนตัว (userId, email, studentId) เพื่อป้องกัน PII Leakage
     return NextResponse.json({
       success: true,
-      userId: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      studentId: user.studentId
+      requiresFaceVerification: true,
+      verificationToken,
+      firstName: user.firstName // ส่งแค่ชื่อเพื่อแสดง UI เท่านั้น
     });
 
   } catch (error) {

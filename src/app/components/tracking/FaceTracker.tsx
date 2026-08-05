@@ -88,11 +88,14 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       }
 
       console.log('🔒 [Security System] ส่งข้อมูลไปเทียบที่ API...')
+      const token = localStorage.getItem('token')
       const response = await fetch('/api/auth/face-verify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
-          userId,
           faceData: descriptor,
           singlePoseVerification: true // ยืนยันว่าคนหน้ากล้องตรงกับผู้สอบหรือไม่
         })
@@ -292,8 +295,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
   }, [sessionName])
 
-  // ฟังก์ชันอัปเดตสถานะ tracking session
-  const endTrackingSession = useCallback(async (sessionId: string, status: 'COMPLETED' | 'INTERRUPTED' = 'COMPLETED') => {
+  // ฟังก์ชันจบ tracking session
+  const endTrackingSession = useCallback(async (sessionId: string, status?: string, isKeepAlive = false) => {
     try {
       const token = localStorage.getItem('token')
       if (!token) {
@@ -309,7 +312,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         body: JSON.stringify({
           sessionId: sessionId,
           status: status
-        })
+        }),
+        keepalive: isKeepAlive
       })
 
       const result = await response.json()
@@ -384,7 +388,14 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   }, [initializeCamera, initializeDetector, startDetection, drawDetectionOverlay, startRecording, createTrackingSession])
 
   // ฟังก์ชันส่งข้อมูลไป API
-  const saveOrientationData = useCallback(async (sessionId: string, events: unknown[], stats: unknown, faceDetectionLossStats?: { lossCount: number; totalLossTime: number }, faceDetectionLossEvents?: unknown[]) => {
+  const saveOrientationData = useCallback(async (
+    sessionId: string, 
+    events: unknown[], 
+    stats: unknown, 
+    faceDetectionLossStats?: { lossCount: number; totalLossTime: number }, 
+    faceDetectionLossEvents?: unknown[],
+    isKeepAlive = false
+  ) => {
     try {
       setIsLoading(true)
       const token = localStorage.getItem('token')
@@ -426,7 +437,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           sessionStats: stats as Record<string, unknown>,
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
           faceDetectionLossEvents: faceDetectionLossEvents || []
-        })
+        }),
+        keepalive: isKeepAlive
       })
 
       const result = await response.json()
@@ -542,42 +554,148 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     onTrackingStop()
   }, [stopDetection, stopCamera, onTrackingStop, isRecording, handleStopRecording, currentSessionId, endTrackingSession])
 
-  // ดักจับการปิดแท็บ คืนค่า หรือปิดหน้าต่างเบราว์เซอร์
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      const sessionId = sessionIdRef.current
-      const isSaved = isSessionSavedRef.current
+  // ฟังก์ชันส่วนกลางสำหรับบันทึกและซิงค์ข้อมูล session ปัจจุบันแบบฉุกเฉินหรือกรณีขาดการเชื่อมต่อ
+  const flushSessionData = useCallback((sessionStatus: string = 'DISCONNECTED', isKeepAlive = true) => {
+    const sessionId = sessionIdRef.current
+    const isSaved = isSessionSavedRef.current
+    
+    if (!sessionId || isSaved) return
+
+    const token = localStorage.getItem('token')
+    if (!token) return
+
+    try {
+      const events = stopRecording()
+      const stats = getCurrentStats()
+      const faceDetectionLossStats = getFaceDetectionLossStats()
+      const faceDetectionLossEvents = getFaceDetectionLossEvents()
       
-      if (sessionId && !isSaved) {
-        markSessionInterrupted(sessionId)
+      const orientationEvents = ((events as Array<{
+        startTime: string;
+        endTime: string;
+        direction: string;
+        duration: number;
+        maxYaw?: number;
+        maxPitch?: number;
+        confidence?: number;
+      }>) || [])
+        .filter(event => event.direction !== 'CENTER')
+        .map(event => ({
+          startTime: event.startTime,
+          endTime: event.endTime,
+          direction: event.direction,
+          duration: event.duration,
+          maxYaw: event.maxYaw || 0,
+          maxPitch: event.maxPitch || 0,
+          confidence: typeof event.confidence === 'number' ? event.confidence : 0.95,
+          isActive: false
+        }))
+
+      // 1. บันทึกข้อมูล logs
+      fetch('/api/tracking/orientation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          sessionId: sessionId,
+          events: orientationEvents,
+          sessionStats: stats || {
+            totalEvents: 0,
+            leftTurns: { count: 0, totalDuration: 0 },
+            rightTurns: { count: 0, totalDuration: 0 },
+            lookingUp: { count: 0, totalDuration: 0 },
+            lookingDown: { count: 0, totalDuration: 0 },
+            centerTime: 0,
+            sessionStartTime: new Date().toISOString()
+          },
+          faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
+          faceDetectionLossEvents: faceDetectionLossEvents || []
+        }),
+        keepalive: isKeepAlive
+      }).catch(err => console.error('Auto-sync orientation error:', err))
+
+      // 2. อัปเดตสถานะ session
+      fetch('/api/tracking/sessions', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          sessionId: sessionId,
+          status: sessionStatus
+        }),
+        keepalive: isKeepAlive
+      }).catch(err => console.error('Auto-sync session status error:', err))
+
+      if (sessionStatus !== 'IN_PROGRESS') {
+        isSessionSavedRef.current = true
+      }
+    } catch (err) {
+      console.error('Flush session data error:', err)
+    }
+  }, [stopRecording, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents])
+
+  // 🔄 ระบบ Periodic Auto-Sync บันทึกข้อมูลลง DB อัตโนมัติทุกๆ 15 วินาทีระหว่างการติดตาม
+  useEffect(() => {
+    let syncInterval: NodeJS.Timeout | null = null
+
+    if (isActive && isRecording && currentSessionId) {
+      syncInterval = setInterval(() => {
+        const sessionId = sessionIdRef.current
+        const isSaved = isSessionSavedRef.current
+        const token = localStorage.getItem('token')
+
+        if (sessionId && !isSaved && token) {
+          const stats = getCurrentStats()
+          const events = getCurrentStats() ? (stats as unknown as { events?: unknown[] }).events || [] : []
+          const faceLossStats = getFaceDetectionLossStats()
+          const faceLossEvents = getFaceDetectionLossEvents()
+
+          if (stats) {
+            saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, false)
+              .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
+              .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
+          }
+        }
+      }, 15000) // ทุก 15 วินาที
+    }
+
+    return () => {
+      if (syncInterval) clearInterval(syncInterval)
+    }
+  }, [isActive, isRecording, currentSessionId, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents, saveOrientationData])
+
+  // 🛡️ ดักจับทุกเหตุการณ์ปิดแท็บ, ย้ายหน้า, ย่อเบราว์เซอร์, ซ่อนแอป (beforeunload, pagehide, visibilitychange)
+  useEffect(() => {
+    const handleUnloadEvents = () => {
+      flushSessionData('DISCONNECTED', true)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushSessionData('IN_PROGRESS', true)
       }
     }
 
-    window.addEventListener('beforeunload', handleBeforeUnload)
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
+      window.removeEventListener('beforeunload', handleUnloadEvents)
+      window.removeEventListener('pagehide', handleUnloadEvents)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [markSessionInterrupted])
+  }, [flushSessionData])
 
-  // Cleanup เมื่อ component unmount (เช่น ย้ายหน้า, ออกจากหน้าตรวจจับ)
+  // Cleanup เมื่อ component unmount (เช่น ย้ายหน้าภายใต้ SPA)
   useEffect(() => {
     return () => {
       stopCamera(videoRef)
-      
-      const sessionId = sessionIdRef.current
-      const isSaved = isSessionSavedRef.current
-      
-      // ถ้ายกเลิก/ออกจากหน้านี้โดยที่ไม่ได้กดยกเลิกแบบกดเซฟ ให้เปลี่ยนสถานะเป็น INTERRUPTED
-      if (sessionId && !isSaved) {
-        console.log('⚠️ Marking tracking session as INTERRUPTED on unmount:', sessionId)
-        markSessionInterrupted(sessionId)
-      }
-      
-      // ล้าง session reference และ flags เมื่อ component ถูก unmount
+      flushSessionData('DISCONNECTED', true)
       sessionIdRef.current = null
       sessionCreationInProgress.current = false
     }
-  }, [stopCamera, markSessionInterrupted])
+  }, [stopCamera, flushSessionData])
 
   // Auto-start tracking when component mounts (เพียงครั้งเดียว)
   const hasAutoStarted = useRef(false)

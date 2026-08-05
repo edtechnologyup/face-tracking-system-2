@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="550b1e2e-7e5a-489b-a94f-75cba149411f" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/prisma/schema.prisma" beforeDir="false" afterPath="$PROJECT_DIR$/prisma/schema.prisma" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/admin/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/admin/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/tracking/orientation/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/tracking/orientation/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/api/tracking/sessions/route.ts" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/api/tracking/sessions/route.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/admin/SessionDetail.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/admin/SessionDetail.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/admin/SessionsList.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/admin/SessionsList.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/auth/FaceCapture.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/auth/FaceCapture.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/auth/FaceLogin.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/auth/FaceLogin.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/auth/FaceReset.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/auth/FaceReset.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/auth/face-capture/CaptureStatus.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/auth/face-capture/CaptureStatus.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/auth/face-login/StatusDisplay.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/auth/face-login/StatusDisplay.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/components/tracking/FaceTracker.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/components/tracking/FaceTracker.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/app/register/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/register/page.tsx" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 1
+}]]></component>
+  <component name="ProjectId" id="3GnOtZeHseylK8sea1PRBXRaOvl" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "git-widget-placeholder": "main",
+    "js.debugger.nextJs.config.created.client": "true",
+    "js.debugger.nextJs.config.created.server": "true",
+    "junie.onboarding.icon.badge.shown": "true",
+    "last_opened_file_path": "/home/paipu/Project/pycharm",
+    "node.js.detected.package.eslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "to.speed.mode.migration.done": "true",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="RunManager" selected="npm.Next.js: server-side">
+    <configuration name="Next.js: debug client-side" type="JavascriptDebugType" uri="http://localhost:3000/">
+      <method v="2" />
+    </configuration>
+    <configuration name="Next.js: server-side" type="js.build_tools.npm">
+      <package-json value="$PROJECT_DIR$/package.json" />
+      <command value="run" />
+      <scripts>
+        <script value="dev" />
+      </scripts>
+      <node-interpreter value="project" />
+      <envs />
+      <method v="2" />
+    </configuration>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-50341a9f1f9c-c2ffad84badb-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.26222.68" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="550b1e2e-7e5a-489b-a94f-75cba149411f" name="Changes" comment="" />
+      <created>1784604082405</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1784604082405</updated>
+      <workItem from="1784604083448" duration="72000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+</project>

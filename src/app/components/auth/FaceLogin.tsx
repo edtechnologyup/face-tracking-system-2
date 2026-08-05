@@ -295,14 +295,17 @@ export function FaceLogin({ isOpen, userId, onSuccess, onCancel }: FaceLoginProp
       const faceDescriptor = await detectFaceAndGetDescriptor(videoRef.current)
       
       // ส่งไปยืนยันกับเซิร์ฟเวอร์
+      const token = localStorage.getItem('token')
       const response = await fetch('/api/auth/face-verify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
-          userId,
           faceData: faceDescriptor,
-          verifiedPoses: { [selectedPose]: true }, // ส่งท่าเดียวที่ยืนยันแล้ว
-          singlePoseVerification: true // บอก API ว่าเป็นการยืนยันท่าเดียว
+          verifiedPoses: { [selectedPose]: true },
+          singlePoseVerification: true
         })
       })
 
@@ -395,14 +398,17 @@ export function FaceLogin({ isOpen, userId, onSuccess, onCancel }: FaceLoginProp
       const isReady = isPoseReadyForLogin(currentDetectedPose, selectedPose, poseConfidence)
       
       if (isReady) {
-        setPoseStableCount((prev: number) => prev + 1)
+        const nextCount = poseStableCount + 1
+        setPoseStableCount(nextCount)
+        setPoseProgress(Math.min(90, nextCount * 10))
         
         // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) ยืนยันอัตโนมัติ
-        if (poseStableCount >= 10) {
+        if (nextCount >= 10) {
           handleAutoVerify()
         }
       } else {
         setPoseStableCount(0)
+        setPoseProgress(0)
       }
     }
   }, [currentDetectedPose, poseConfidence, poseStableCount, autoVerifying, isVerifyingPose, isPoseVerified, selectedPose, handleAutoVerify])

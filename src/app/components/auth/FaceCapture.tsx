@@ -284,14 +284,17 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
       const isReady = isPoseReady(currentDetectedPose, targetPose, poseConfidence, isBlinking);
       
       if (isReady) {
-        setPoseStableCount(prev => prev + 1);
+        const nextCount = poseStableCount + 1;
+        setPoseStableCount(nextCount);
+        setPoseProgress(Math.min(90, nextCount * 10));
         
         // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) จับภาพอัตโนมัติ
-        if (poseStableCount >= 10) {
+        if (nextCount >= 10) {
           handleAutoCapture();
         }
       } else {
         setPoseStableCount(0);
+        setPoseProgress(0);
       }
     }
   }, [currentDetectedPose, poseConfidence, isBlinking, poseStableCount, autoCapturing, isCapturingPose, isAllPosesComplete, currentPose.type, handleAutoCapture]);

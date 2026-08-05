@@ -1,18 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import jwt from 'jsonwebtoken'
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('=== Face Register API Called ===')
-    
-    const body = await request.json()
-    console.log('Request body:', body)
+    // ตรวจสอบ JWT_SECRET
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured')
+    }
 
-    const { userId, faceData } = body
+    // ตรวจสอบ Authorization header
+    const authorization = request.headers.get('authorization')
+    if (!authorization || !authorization.startsWith('Bearer ')) {
+      return NextResponse.json(
+        { error: 'กรุณาเข้าสู่ระบบก่อนลงทะเบียนใบหน้า' },
+        { status: 401 }
+      )
+    }
+
+    const token = authorization.substring(7)
+
+    // ตรวจสอบ token (รองรับทั้ง JWT ปกติ และ registrationToken)
+    let userId: string
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; purpose?: string }
+      
+      // ยอมรับเฉพาะ token ที่มี purpose เป็น 'face-registration' หรือ token login ปกติ
+      if (decoded.purpose && decoded.purpose !== 'face-registration') {
+        return NextResponse.json(
+          { error: 'Token ไม่ถูกต้องสำหรับการลงทะเบียนใบหน้า' },
+          { status: 403 }
+        )
+      }
+
+      userId = decoded.userId
+    } catch {
+      return NextResponse.json(
+        { error: 'Token ไม่ถูกต้องหรือหมดอายุ กรุณาลงทะเบียนใหม่' },
+        { status: 401 }
+      )
+    }
+
+    const body = await request.json()
+    const { faceData } = body
 
     // ตรวจสอบฟิลด์ที่จำเป็น
-    if (!userId || !faceData) {
-      console.log('Missing required fields')
+    if (!faceData) {
       return NextResponse.json(
         { error: 'ข้อมูลไม่ครบถ้วน' },
         { status: 400 }
@@ -21,7 +55,6 @@ export async function POST(request: NextRequest) {
 
     // ตรวจสอบรูปแบบข้อมูลใบหน้า - คาดหวังว่าจะมีหลายท่า
     if (typeof faceData !== 'object' || faceData === null) {
-      console.log('Invalid face data format: not an object')
       return NextResponse.json(
         { error: 'ข้อมูลใบหน้าไม่ถูกต้อง' },
         { status: 400 }
@@ -33,7 +66,6 @@ export async function POST(request: NextRequest) {
     
     // อนุญาตท่าบางส่วน (ต้องมีท่าหน้าตรงอย่างน้อย)
     if (!faceData.front || !Array.isArray(faceData.front) || faceData.front.length !== 128) {
-      console.log('Missing or invalid front pose data')
       return NextResponse.json(
         { error: 'ต้องมีข้อมูลใบหน้าท่าหน้าตรงอย่างน้อย' },
         { status: 400 }
@@ -50,15 +82,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log('Multi-pose face data validated. Poses:', providedPoses)
-
-    console.log('Updating user with face data...')
-
-    // อัปเดตข้อมูลผู้ใช้ด้วยข้อมูลใบหน้า
+    // อัปเดตข้อมูลผู้ใช้ด้วยข้อมูลใบหน้า (ใช้ userId จาก token เท่านั้น)
     const user = await prisma.user.update({
       where: { id: userId },
       data: { 
-        faceData: JSON.stringify(faceData) // บันทึกเป็นสตริง JSON
+        faceData: JSON.stringify(faceData)
       }
     })
 
@@ -71,9 +99,7 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error: unknown) {
-    console.error('=== Face Register API Error ===')
-    console.error('Error details:', error)
-    console.error('Error message:', error instanceof Error ? error.message : 'Unknown error')
+    console.error('Face Register API Error:', error instanceof Error ? error.message : 'Unknown error')
 
     // ตรวจสอบข้อผิดพลาดเฉพาะของฐานข้อมูล
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {

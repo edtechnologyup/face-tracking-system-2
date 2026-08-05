@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { Prisma } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 
 // Interface สำหรับ request body
@@ -53,8 +54,13 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7)
     let userId: string
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: 'ไม่ได้ตั้งค่า JWT_SECRET' }, { status: 500 })
+    }
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string }
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string }
       userId = decoded.userId
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
@@ -75,50 +81,56 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ไม่พบ session หรือไม่มีสิทธิ์เข้าถึง' }, { status: 404 })
     }
 
-    // บันทึกแต่ละ orientation event เป็น TrackingLog
-    const savedLogs = await Promise.all(
-      events.map(async (event) => {
-        return await prisma.trackingLog.create({
-          data: {
+    // เตรียมข้อมูล logs ทั้งหมด
+    const logsData: Prisma.TrackingLogCreateManyInput[] = []
+
+    // 1. เพิ่ม orientation events
+    events.forEach(event => {
+      logsData.push({
+        sessionId: sessionId,
+        detectionType: 'FACE_ORIENTATION',
+        detectionData: {
+          direction: event.direction,
+          startTime: event.startTime,
+          endTime: event.endTime,
+          duration: event.duration,
+          maxYaw: event.maxYaw,
+          maxPitch: event.maxPitch
+        },
+        confidence: typeof event.confidence === 'number' ? event.confidence : 0.95
+      })
+    })
+
+    // 2. เพิ่ม face detection loss events
+    let lossLogsCount = 0
+    if (faceDetectionLossEvents && faceDetectionLossEvents.length > 0) {
+      faceDetectionLossEvents.forEach(event => {
+        if (!event.isActive && event.endTime && event.duration) {
+          logsData.push({
             sessionId: sessionId,
-            detectionType: 'FACE_ORIENTATION',
+            detectionType: 'FACE_DETECTION_LOSS',
             detectionData: {
-              direction: event.direction,
               startTime: event.startTime,
               endTime: event.endTime,
               duration: event.duration,
-              maxYaw: event.maxYaw,
-              maxPitch: event.maxPitch
+              isMismatch: event.isMismatch || false,
+              reason: event.reason || undefined
             },
-            confidence: typeof event.confidence === 'number' ? event.confidence : 0.95
-          }
-        })
-      })
-    )
-
-    // บันทึก Face Detection Loss Events เป็น TrackingLog แยกรายการ (ถ้ามี)
-    const faceDetectionLossLogs = []
-    if (faceDetectionLossEvents && faceDetectionLossEvents.length > 0) {
-      for (const event of faceDetectionLossEvents) {
-        if (!event.isActive && event.endTime && event.duration) {
-          const faceDetectionLossLog = await prisma.trackingLog.create({
-            data: {
-              sessionId: sessionId,
-              detectionType: 'FACE_DETECTION_LOSS',
-              detectionData: {
-                startTime: event.startTime,
-                endTime: event.endTime,
-                duration: event.duration,
-                isMismatch: event.isMismatch || false,
-                reason: event.reason || undefined
-              },
-              confidence: 1.0 // การไม่พบใบหน้าเป็นข้อมูลที่แน่นอน
-            }
+            confidence: 1.0 // การไม่พบใบหน้าเป็นข้อมูลที่แน่นอน
           })
-          faceDetectionLossLogs.push(faceDetectionLossLog)
+          lossLogsCount++
         }
-      }
-      console.log(`🚨 บันทึก Face Detection Loss: ${faceDetectionLossLogs.length} events, รวม ${faceDetectionLoss?.totalLossTime || 0} วินาที`)
+      })
+      console.log(`🚨 ตรวจพบ Face Detection Loss: ${lossLogsCount} events, รวม ${faceDetectionLoss?.totalLossTime || 0} วินาที`)
+    }
+
+    // 3. ทำการบันทึกแบบสร้างข้อมูลหลายแถว (Bulk Insert) ในครั้งเดียว เพื่อป้องกันการโหลดช้า
+    let logsCreated = 0
+    if (logsData.length > 0) {
+      const batchResult = await prisma.trackingLog.createMany({
+        data: logsData
+      })
+      logsCreated = batchResult.count
     }
 
     // อัปเดตหรือสร้าง SessionStatistics
@@ -145,12 +157,6 @@ export async function POST(request: NextRequest) {
       // Face detection loss summary
       faceDetectionLoss: faceDetectionLoss?.lossCount || 0,
       totalLossTime: faceDetectionLoss?.totalLossTime || 0
-      
-      // === REMOVED DUPLICATED DATA ===
-      // avgFaceOrientation - ลบออก เพราะ compute ได้จาก TrackingLog
-      // totalEvents - ลบออก เพราะ COUNT ได้จาก TrackingLog  
-      // centerTime - ลบออก เพราะไม่เก็บใน TrackingLog อยู่แล้ว
-      // sessionStartTime - ลบออก เพราะมีใน TrackingSession.startTime แล้ว
     }
 
     let sessionStatistics
@@ -170,18 +176,15 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    console.log(`✅ บันทึก ${savedLogs.length} orientation events สำหรับ session ${sessionId}`)
-    if (faceDetectionLossLogs.length > 0) {
-      console.log(`🚨 บันทึก ${faceDetectionLossLogs.length} Face Detection Loss Events สำหรับ session ${sessionId}`)
-    }
+    console.log(`✅ บันทึก logs ทั้งหมด ${logsCreated} รายการ สำหรับ session ${sessionId}`)
     
     return NextResponse.json({
       success: true,
-      message: `บันทึก ${savedLogs.length} orientation events${faceDetectionLossLogs.length > 0 ? ` + ${faceDetectionLossLogs.length} Face Detection Loss events` : ''} สำเร็จ`,
+      message: `บันทึก logs ทั้งหมด ${logsCreated} รายการ สำเร็จ`,
       data: {
-        logsCreated: savedLogs.length + faceDetectionLossLogs.length,
-        orientationLogsCreated: savedLogs.length,
-        faceDetectionLossLogCreated: faceDetectionLossLogs.length,
+        logsCreated: logsCreated,
+        orientationLogsCreated: events.length,
+        faceDetectionLossLogCreated: lossLogsCount,
         sessionStatistics: sessionStatistics,
         summary: {
           totalEvents: sessionStats.totalEvents,
@@ -224,8 +227,13 @@ export async function GET(request: NextRequest) {
     const token = authHeader.substring(7)
     let userId: string
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: 'ไม่ได้ตั้งค่า JWT_SECRET' }, { status: 500 })
+    }
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string }
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string }
       userId = decoded.userId
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })

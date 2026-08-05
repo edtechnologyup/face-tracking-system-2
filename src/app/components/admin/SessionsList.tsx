@@ -10,7 +10,7 @@ interface TrackingSession {
   startTime: string
   endTime: string | null
   totalDuration: number | null
-  status?: 'IN_PROGRESS' | 'COMPLETED' | 'INTERRUPTED' | string
+  status?: string | null
   user: {
     firstName: string
     lastName: string
@@ -148,13 +148,13 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        session.status === 'INTERRUPTED' ? 'bg-red-100 text-red-800 border border-red-200' :
-                        session.status === 'COMPLETED' || session.endTime ? 'bg-gray-100 text-gray-800' :
+                        session.status === 'DISCONNECTED' || session.status === 'INTERRUPTED' ? 'bg-red-100 text-red-800 border border-red-200' :
+                        session.endTime ? 'bg-gray-100 text-gray-800' : 
                         'bg-green-100 text-green-800 animate-pulse'
                       }`}>
-                        {session.status === 'INTERRUPTED' ? 'หยุดการบันทึกกลางคัน' :
-                         session.status === 'COMPLETED' || session.endTime ? 'เสร็จสิ้น' :
-                         'กำลังดำเนินการ'}
+                        {session.status === 'DISCONNECTED' ? 'ขาดการเชื่อมต่อระหว่างตรวจจับ' :
+                         session.status === 'INTERRUPTED' ? 'หยุดการบันทึกกลางคัน' :
+                         session.endTime ? 'เสร็จสิ้น' : 'กำลังดำเนินการ'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

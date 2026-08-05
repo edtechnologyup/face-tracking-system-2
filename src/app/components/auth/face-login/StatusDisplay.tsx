@@ -12,7 +12,7 @@ export function StatusDisplay({ isPoseVerified, selectedPose, loading }: StatusD
       <div className="text-center">
         <div className="text-green-600 text-4xl mb-2">✓</div>
         <p className="text-green-600 font-semibold">
-          {loading ? 'กำลังยืนยันตัวตน...' : 'ยืนยันท่าสำเร็จแล้ว'}
+          {loading ? 'กำลังตรวจจับ...' : 'ยืนยันท่าสำเร็จแล้ว'}
         </p>
       </div>
     )

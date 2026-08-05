@@ -15,10 +15,18 @@ export async function GET(request: NextRequest) {
 
     const token = authorization.substring(7)
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      return NextResponse.json(
+        { error: 'ไม่ได้ตั้งค่า JWT_SECRET' },
+        { status: 500 }
+      )
+    }
+
     // ตรวจสอบ JWT token
     let decoded: { userId: string; role: string }
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret') as { userId: string; role: string }
+      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; role: string }
     } catch {
       return NextResponse.json(
         { error: 'Token ไม่ถูกต้องหรือหมดอายุ' },
@@ -39,40 +47,57 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // ดึงข้อมูลสถิติ
+    // ดึงข้อมูลสถิติพื้นฐาน (ใช้ count ซึ่งเป็น DB aggregation อยู่แล้ว)
     const [totalUsers, totalAdmins, totalSessions, activeSessions, interruptedSessions] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { role: 'ADMIN' } }),
       prisma.trackingSession.count(),
-      prisma.trackingSession.count({ where: { status: 'IN_PROGRESS', endTime: null } }),
-      prisma.trackingSession.count({ where: { status: 'INTERRUPTED' } })
+      prisma.trackingSession.count({ where: { endTime: null } }),
+      prisma.trackingSession.count({ where: { status: 'DISCONNECTED' } })
     ])
 
-    // ดึงข้อมูลพฤติกรรมสำหรับกราฟ
-    const behaviorStats = await prisma.trackingLog.findMany({
-      where: {
-        detectionType: 'FACE_ORIENTATION'
-      },
-      select: {
-        detectionData: true
-      }
-    })
+    // ใช้ raw SQL เพื่อ aggregate ข้อมูลพฤติกรรมบน database แทนดึงทั้งหมดมา JS
+    const orientationAgg = await prisma.$queryRaw<
+      Array<{ direction: string; count: bigint; total_time: number }>
+    >`
+      SELECT 
+        "detectionData"->>'direction' as direction,
+        COUNT(*)::bigint as count,
+        COALESCE(SUM(
+          CASE 
+            WHEN jsonb_typeof("detectionData"->'duration') = 'number' 
+              THEN ("detectionData"->>'duration')::double precision
+            WHEN jsonb_typeof("detectionData"->'duration') = 'string' 
+              THEN ("detectionData"->>'duration')::double precision
+            ELSE 0
+          END
+        ), 0) as total_time
+      FROM "TrackingLog"
+      WHERE "detectionType" = 'FACE_ORIENTATION'
+        AND "detectionData"->>'direction' IS NOT NULL
+      GROUP BY "detectionData"->>'direction'
+    `
 
-    console.log('Behavior stats found:', behaviorStats.length)
-    console.log('First 3 behavior records:', behaviorStats.slice(0, 3))
-    
-    // นับ direction ต่าง ๆ ทั้งหมด
-    const directionCount: Record<string, number> = {}
-    behaviorStats.forEach(log => {
-      if (log.detectionData && typeof log.detectionData === 'object') {
-        const data = log.detectionData as Record<string, unknown>
-        const direction = data.direction as string
-        directionCount[direction] = (directionCount[direction] || 0) + 1
-      }
-    })
-    console.log('Direction counts in data:', directionCount)
+    // นับจำนวนและรวมเวลาสำหรับ FACE_DETECTION_LOSS logs
+    const faceLossAgg = await prisma.$queryRaw<
+      Array<{ count: bigint; total_time: number }>
+    >`
+      SELECT 
+        COUNT(*)::bigint as count,
+        COALESCE(SUM(
+          CASE 
+            WHEN jsonb_typeof("detectionData"->'duration') = 'number' 
+              THEN ("detectionData"->>'duration')::double precision
+            WHEN jsonb_typeof("detectionData"->'duration') = 'string' 
+              THEN ("detectionData"->>'duration')::double precision
+            ELSE 0
+          END
+        ), 0) as total_time
+      FROM "TrackingLog"
+      WHERE "detectionType" = 'FACE_DETECTION_LOSS'
+    `
 
-    // วิเคราะห์ข้อมูลพฤติกรรม
+    // แปลงผลลัพธ์จาก DB aggregation เป็น behaviorCounts
     const behaviorCounts = {
       leftTurn: { count: 0, totalTime: 0 },
       rightTurn: { count: 0, totalTime: 0 },
@@ -81,84 +106,38 @@ export async function GET(request: NextRequest) {
       faceLoss: { count: 0, totalTime: 0 }
     }
 
-    // นับข้อมูลการสูญเสียใบหน้า
-    const faceLossStats = await prisma.trackingLog.findMany({
-      where: {
-        detectionType: 'FACE_DETECTION_LOSS'
-      },
-      select: {
-        detectionData: true
+    for (const row of orientationAgg) {
+      const count = Number(row.count)
+      const totalTime = row.total_time || 0
+
+      switch (row.direction) {
+        case 'LEFT':
+        case 'หันซ้าย':
+          behaviorCounts.leftTurn.count += count
+          behaviorCounts.leftTurn.totalTime += totalTime
+          break
+        case 'RIGHT':
+        case 'หันขวา':
+          behaviorCounts.rightTurn.count += count
+          behaviorCounts.rightTurn.totalTime += totalTime
+          break
+        case 'DOWN':
+        case 'ก้มหน้า':
+          behaviorCounts.lookDown.count += count
+          behaviorCounts.lookDown.totalTime += totalTime
+          break
+        case 'UP':
+        case 'เงยหน้า':
+          behaviorCounts.lookUp.count += count
+          behaviorCounts.lookUp.totalTime += totalTime
+          break
       }
-    })
+    }
 
-    console.log('Face loss stats found:', faceLossStats.length)
-    console.log('First 3 face loss records:', faceLossStats.slice(0, 3))
-
-    // วิเคราะห์ข้อมูลการสูญเสียใบหน้า
-    faceLossStats.forEach(log => {
-      if (log.detectionData && typeof log.detectionData === 'object') {
-        const data = log.detectionData as Record<string, unknown>
-        behaviorCounts.faceLoss.count += 1
-        if (data.duration && typeof data.duration === 'string') {
-          behaviorCounts.faceLoss.totalTime += parseFloat(data.duration) || 0
-        } else if (data.duration && typeof data.duration === 'number') {
-          behaviorCounts.faceLoss.totalTime += data.duration || 0
-        }
-      }
-    })
-
-    // วิเคราะห์ข้อมูลการหันหน้า
-    behaviorStats.forEach(log => {
-      if (log.detectionData && typeof log.detectionData === 'object') {
-        const data = log.detectionData as Record<string, unknown>
-        const direction = data.direction as string
-
-        console.log('Processing direction:', direction, 'with duration:', data.duration)
-        
-        switch (direction) {
-          case 'LEFT':
-          case 'หันซ้าย':
-            behaviorCounts.leftTurn.count += 1
-            if (data.duration && typeof data.duration === 'string') {
-              behaviorCounts.leftTurn.totalTime += parseFloat(data.duration) || 0
-            } else if (data.duration && typeof data.duration === 'number') {
-              behaviorCounts.leftTurn.totalTime += data.duration || 0
-            }
-            console.log('LEFT processed, new count:', behaviorCounts.leftTurn.count)
-            break
-          case 'RIGHT':
-          case 'หันขวา':
-            behaviorCounts.rightTurn.count += 1
-            if (data.duration && typeof data.duration === 'string') {
-              behaviorCounts.rightTurn.totalTime += parseFloat(data.duration) || 0
-            } else if (data.duration && typeof data.duration === 'number') {
-              behaviorCounts.rightTurn.totalTime += data.duration || 0
-            }
-            console.log('RIGHT processed, new count:', behaviorCounts.rightTurn.count)
-            break
-          case 'DOWN':
-          case 'ก้มหน้า':
-            behaviorCounts.lookDown.count += 1
-            if (data.duration && typeof data.duration === 'string') {
-              behaviorCounts.lookDown.totalTime += parseFloat(data.duration) || 0
-            } else if (data.duration && typeof data.duration === 'number') {
-              behaviorCounts.lookDown.totalTime += data.duration || 0
-            }
-            console.log('DOWN processed, new count:', behaviorCounts.lookDown.count)
-            break
-          case 'UP':
-          case 'เงยหน้า':
-            behaviorCounts.lookUp.count += 1
-            if (data.duration && typeof data.duration === 'string') {
-              behaviorCounts.lookUp.totalTime += parseFloat(data.duration) || 0
-            } else if (data.duration && typeof data.duration === 'number') {
-              behaviorCounts.lookUp.totalTime += data.duration || 0
-            }
-            console.log('UP processed, new count:', behaviorCounts.lookUp.count)
-            break
-        }
-      }
-    })
+    if (faceLossAgg.length > 0) {
+      behaviorCounts.faceLoss.count = Number(faceLossAgg[0].count)
+      behaviorCounts.faceLoss.totalTime = faceLossAgg[0].total_time || 0
+    }
 
     // เตรียมข้อมูลกราฟ
     const chartData = [
@@ -198,9 +177,6 @@ export async function GET(request: NextRequest) {
         lightColor: '#fca5a5'
       }
     ]
-
-    console.log('Final chart data:', chartData)
-    console.log('Behavior counts processed:', behaviorCounts)
 
     return NextResponse.json({
       totalUsers,

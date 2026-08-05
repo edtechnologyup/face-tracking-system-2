@@ -53,9 +53,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       isDuplicate,
-      message: isDuplicate ? message : 'ข้อมูลสามารถใช้งานได้',
-      field,
-      value
+      message: isDuplicate ? message : 'ข้อมูลสามารถใช้งานได้'
     })
 
   } catch (error: unknown) {

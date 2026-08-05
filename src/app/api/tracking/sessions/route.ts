@@ -10,7 +10,7 @@ interface CreateSessionRequest {
 
 interface EndSessionRequest {
   sessionId: string;
-  status?: 'COMPLETED' | 'INTERRUPTED';
+  status?: string;
 }
 
 // สร้าง tracking session ใหม่
@@ -25,8 +25,13 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7)
     let userId: string
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: 'ไม่ได้ตั้งค่า JWT_SECRET' }, { status: 500 })
+    }
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string }
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string }
       userId = decoded.userId
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
@@ -84,15 +89,20 @@ export async function PUT(request: NextRequest) {
     const token = authHeader.substring(7)
     let userId: string
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: 'ไม่ได้ตั้งค่า JWT_SECRET' }, { status: 500 })
+    }
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string }
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string }
       userId = decoded.userId
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
     }
 
     const body: EndSessionRequest = await request.json()
-    const { sessionId, status: requestedStatus } = body
+    const { sessionId, status } = body
 
     if (!sessionId) {
       return NextResponse.json({ error: 'กรุณาระบุ sessionId' }, { status: 400 })
@@ -113,7 +123,6 @@ export async function PUT(request: NextRequest) {
     // คำนวณระยะเวลารวมเป็นวินาที พร้อมเวลาไทย (UTC+7)  
     const endTime = getThailandTime()
     const totalDuration = calculateDurationInSeconds(existingSession.startTime, endTime)
-    const newStatus = requestedStatus === 'INTERRUPTED' ? 'INTERRUPTED' : 'COMPLETED'
 
     // อัปเดต session ให้จบหรือหยุดกลางคัน
     const updatedSession = await prisma.trackingSession.update({
@@ -121,15 +130,15 @@ export async function PUT(request: NextRequest) {
       data: {
         endTime: endTime,
         totalDuration: totalDuration,
-        status: newStatus
+        status: status || 'COMPLETED'
       }
     })
 
-    console.log(`✅ อัปเดต tracking session: ${sessionId} (สถานะ: ${newStatus}, ระยะเวลา: ${totalDuration} วิ)`)
+    console.log(`✅ อัปเดต tracking session: ${sessionId} (สถานะ: ${status || 'COMPLETED'}, ระยะเวลา: ${totalDuration} วิ)`)
     
     return NextResponse.json({
       success: true,
-      message: `อัปเดต session สำเร็จ (${newStatus})`,
+      message: `อัปเดต session สำเร็จ (${status || 'COMPLETED'})`,
       data: {
         sessionId: updatedSession.id,
         sessionName: updatedSession.sessionName,
@@ -162,8 +171,13 @@ export async function GET(request: NextRequest) {
     const token = authHeader.substring(7)
     let userId: string
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: 'ไม่ได้ตั้งค่า JWT_SECRET' }, { status: 500 })
+    }
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string }
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string }
       userId = decoded.userId
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
@@ -226,8 +240,13 @@ export async function DELETE(request: NextRequest) {
     const token = authHeader.substring(7)
     let userId: string
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      return NextResponse.json({ error: 'ไม่ได้ตั้งค่า JWT_SECRET' }, { status: 500 })
+    }
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string }
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string }
       userId = decoded.userId
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })

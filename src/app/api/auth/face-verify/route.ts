@@ -16,14 +16,88 @@ function euclideanDistance(arr1: number[], arr2: number[]): number {
   return Math.sqrt(sum);
 }
 
+// ฟังก์ชัน extract userId จาก token (รองรับหลาย purpose)
+function extractUserIdFromToken(
+  request: NextRequest, 
+  secret: string, 
+  allowedPurposes: string[]
+): { userId: string | null; error: NextResponse | null } {
+  const authorization = request.headers.get('authorization')
+  if (!authorization || !authorization.startsWith('Bearer ')) {
+    return { 
+      userId: null, 
+      error: NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อน' }, { status: 401 }) 
+    }
+  }
+
+  const token = authorization.substring(7)
+  try {
+    const decoded = jwt.verify(token, secret) as { userId: string; purpose?: string }
+    
+    // ตรวจสอบ purpose ของ token
+    const tokenPurpose = decoded.purpose || 'login'
+    if (!allowedPurposes.includes(tokenPurpose)) {
+      return { 
+        userId: null, 
+        error: NextResponse.json({ error: 'Token ไม่ถูกต้องสำหรับการดำเนินการนี้' }, { status: 403 }) 
+      }
+    }
+
+    return { userId: decoded.userId, error: null }
+  } catch {
+    return { 
+      userId: null, 
+      error: NextResponse.json({ error: 'Token ไม่ถูกต้องหรือหมดอายุ' }, { status: 401 }) 
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    console.log('=== Face Verify API Called ===')
-    
-    const { userId, faceData, verifiedPoses, singlePoseVerification, forPasswordReset } = await request.json()
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured')
+    }
+
+    const body = await request.json()
+    const { faceData, verifiedPoses, singlePoseVerification, forPasswordReset, verificationToken } = body
+
+    // กำหนด userId จาก source ที่เหมาะสม
+    let userId: string | null = null
+
+    if (forPasswordReset && verificationToken) {
+      // Flow: forgot-password → face-verify (ใช้ verificationToken แทน JWT)
+      try {
+        const decoded = jwt.verify(verificationToken, JWT_SECRET) as { userId: string; purpose?: string }
+        if (decoded.purpose !== 'face-verification') {
+          return NextResponse.json(
+            { error: 'Token ยืนยันตัวตนไม่ถูกต้อง' },
+            { status: 403 }
+          )
+        }
+        userId = decoded.userId
+      } catch {
+        return NextResponse.json(
+          { error: 'Token ยืนยันตัวตนหมดอายุ กรุณาเริ่มกระบวนการรีเซ็ตรหัสผ่านใหม่' },
+          { status: 401 }
+        )
+      }
+    } else {
+      // Flow ปกติ: login 2FA, tracking identity check — ใช้ JWT จาก Authorization header
+      const result = extractUserIdFromToken(request, JWT_SECRET, ['login', 'face-registration'])
+      if (result.error) return result.error
+      userId = result.userId
+    }
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'ไม่สามารถระบุตัวตนผู้ใช้ได้' },
+        { status: 401 }
+      )
+    }
 
     // ตรวจสอบข้อมูลที่รับเข้ามา
-    if (!userId || !faceData) {
+    if (!faceData) {
       return NextResponse.json(
         { error: 'ข้อมูลไม่ครบถ้วน' },
         { status: 400 }
@@ -37,8 +111,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-
-    console.log('Getting stored face data for user:', userId)
 
     // ดึงข้อมูลใบหน้าที่บันทึกไว้
     const user = await prisma.user.findUnique({
@@ -60,8 +132,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('Comparing face descriptors...')
-
     // เปรียบเทียบข้อมูลลักษณะใบหน้า
     let storedFaceData: Record<string, number[]> | number[]
     
@@ -79,14 +149,12 @@ export async function POST(request: NextRequest) {
     // ตรวจสอบว่าข้อมูลที่บันทึกเป็นหลายท่า (object) หรือท่าเดียว (array)
     if (Array.isArray(storedFaceData)) {
       // ข้อมูลท่าเดียวรุ่นเก่า
-      console.log('Using legacy single pose comparison')
       const distance = euclideanDistance(faceData, storedFaceData)
       distances.push({ pose: 'legacy', distance })
       minDistance = distance
       bestMatch = 'legacy'
     } else {
       // ข้อมูลหลายท่า - เปรียบเทียบกับทุกท่าที่บันทึกไว้
-      console.log('Using multi-pose comparison')
       const poses = Object.keys(storedFaceData)
       
       for (const pose of poses) {
@@ -102,8 +170,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // เกณฑ์การจับคู่ใบหน้า - ใช้การจับคู่ที่ดีที่สุด
-    // ปรับ threshold ให้สมดุลขึ้นระหว่างความปลอดภัยและความสะดวกของผู้ใช้ (แนะนำที่ 0.4 สำหรับ Single-pose เพื่อความปลอดภัยสูงสุด)
+    // เกณฑ์การจับคู่ใบหน้า
     const threshold = 0.4
     
     // เพิ่มการตรวจสอบเพิ่มเติม - ต้องมีการตรงกับหลายท่า
@@ -118,41 +185,15 @@ export async function POST(request: NextRequest) {
         const verifiedPoseTypes = Object.keys(verifiedPoses).filter(pose => verifiedPoses[pose])
         poseVerificationPassed = verifiedPoseTypes.length >= 1 && 
                                  verifiedPoseTypes.some(pose => requiredPoses.includes(pose))
-        
-        console.log('Single-pose verification:', {
-          verifiedPoses,
-          verifiedPoseTypes,
-          passed: poseVerificationPassed
-        })
       } else {
         // การยืนยันหลายท่า - ต้องครบ 3 ท่า
         const requiredPoses = ['front', 'left', 'right']
         const verifiedCount = requiredPoses.filter(pose => verifiedPoses[pose]).length
         poseVerificationPassed = verifiedCount >= 3
-        
-        console.log('Multi-pose verification:', {
-          verifiedPoses,
-          verifiedCount,
-          requiredPoses: requiredPoses.length,
-          passed: poseVerificationPassed
-        })
       }
     }
     
     const isMatch = minDistance < threshold && validMatches.length > 0 && poseVerificationPassed
-
-    console.log('Face comparison result:', {
-      distances,
-      minDistance,
-      bestMatch,
-      threshold,
-      validMatches: validMatches.length,
-      poseVerificationPassed,
-      verifiedPoses,
-      isMatch,
-      user: `${user.firstName} ${user.lastName}`,
-      security: singlePoseVerification ? 'Single-pose verification with stricter threshold' : 'Enhanced verification with 3-pose confirmation and stricter threshold'
-    })
 
     let resetToken: string | undefined = undefined
     if (isMatch && forPasswordReset) {
@@ -162,8 +203,8 @@ export async function POST(request: NextRequest) {
           email: user.email, 
           purpose: 'password-reset' 
         },
-        process.env.JWT_SECRET || 'fallback-secret',
-        { expiresIn: '15m' } // 15 mins for security
+        JWT_SECRET,
+        { expiresIn: '15m' }
       )
     }
 
@@ -182,7 +223,7 @@ export async function POST(request: NextRequest) {
     })
 
   } catch (error: unknown) {
-    console.error('Face verification error:', error)
+    console.error('Face verification error:', error instanceof Error ? error.message : 'Unknown error')
     
     return NextResponse.json(
       { 

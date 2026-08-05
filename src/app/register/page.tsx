@@ -55,6 +55,10 @@ export default function RegisterPage() {
           setUserData(result.user)
           localStorage.setItem('tempUserId', result.user.id)
           localStorage.setItem('tempUser', JSON.stringify(result.user))
+          // เก็บ registrationToken สำหรับลงทะเบียนใบหน้า
+          if (result.registrationToken) {
+            localStorage.setItem('registrationToken', result.registrationToken)
+          }
         }
         
         toast.success('สมัครสมาชิกสำเร็จ กรุณาลงทะเบียนใบหน้าเพื่อเพิ่มความปลอดภัย')
@@ -88,13 +92,17 @@ export default function RegisterPage() {
       console.log('Saving multi-pose face data for user:', userData.email)
       console.log('Captured poses:', Object.keys(faceDescriptors))
       
+      const registrationToken = localStorage.getItem('registrationToken')
+      const authToken = localStorage.getItem('token')
+      const tokenToUse = registrationToken || authToken
+
       const response = await fetch('/api/auth/face-register', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(tokenToUse ? { 'Authorization': `Bearer ${tokenToUse}` } : {})
         },
         body: JSON.stringify({
-          userId: userData.id,
           faceData: faceDescriptors
         })
       })
@@ -105,9 +113,10 @@ export default function RegisterPage() {
         // สำเร็จ - ลบข้อมูลชั่วคราวและไปหน้าเข้าสู่ระบบ
         localStorage.removeItem('tempUserId')
         localStorage.removeItem('tempUser')
+        localStorage.removeItem('registrationToken')
         
         toast.success('ลงทะเบียนใบหน้าสำเร็จ!')
-        
+              
         // เปลี่ยนไปหน้าเข้าสู่ระบบหลังจาก 2 วินาที
         setTimeout(() => {
           window.location.href = '/login'

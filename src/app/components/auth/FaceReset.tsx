@@ -9,7 +9,7 @@ import { LoadingIndicator } from './face-login/LoadingIndicator'
 
 interface FaceResetProps {
   isOpen: boolean
-  userId: string
+  verificationToken: string
   onSuccess: (resetToken: string) => void
   onCancel: () => void
 }
@@ -31,7 +31,7 @@ const AVAILABLE_POSES: PoseData[] = [
   { type: 'right', title: 'หันขวา', instruction: 'หันหน้าไปทางขวา 30 องศา', icon: '👉' }
 ]
 
-export function FaceReset({ isOpen, userId, onSuccess, onCancel }: FaceResetProps) {
+export function FaceReset({ isOpen, verificationToken, onSuccess, onCancel }: FaceResetProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const poseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -261,7 +261,7 @@ export function FaceReset({ isOpen, userId, onSuccess, onCancel }: FaceResetProp
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId,
+          verificationToken,
           faceData: faceDescriptor,
           verifiedPoses: { [selectedPose]: true },
           singlePoseVerification: true,
@@ -284,7 +284,7 @@ export function FaceReset({ isOpen, userId, onSuccess, onCancel }: FaceResetProp
     } finally {
       setLoading(false)
     }
-  }, [userId, selectedPose, onSuccess])
+  }, [verificationToken, selectedPose, onSuccess])
 
   const handleAutoVerify = useCallback(async () => {
     if (!videoRef.current || isVerifyingPose || autoVerifying || !selectedPose) return
@@ -347,12 +347,15 @@ export function FaceReset({ isOpen, userId, onSuccess, onCancel }: FaceResetProp
       const isReady = isPoseReadyForLogin(currentDetectedPose, selectedPose, poseConfidence)
       
       if (isReady) {
-        setPoseStableCount((prev: number) => prev + 1)
-        if (poseStableCount >= 10) {
+        const nextCount = poseStableCount + 1
+        setPoseStableCount(nextCount)
+        setPoseProgress(Math.min(90, nextCount * 10))
+        if (nextCount >= 10) {
           handleAutoVerify()
         }
       } else {
         setPoseStableCount(0)
+        setPoseProgress(0)
       }
     }
   }, [currentDetectedPose, poseConfidence, poseStableCount, autoVerifying, isVerifyingPose, isPoseVerified, selectedPose, handleAutoVerify])

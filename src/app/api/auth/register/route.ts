@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
 import { validateName, validateEmail, validateStudentId, validatePassword, validateTitle, validatePhoneNumber } from '@/lib/utils/validation'
 
 export async function GET(request: NextRequest) {
@@ -138,10 +139,23 @@ export async function POST(request: NextRequest) {
 
     console.log('User created successfully:', user.id)
 
+    // สร้าง registration token สำหรับขั้นตอนลงทะเบียนใบหน้า (อายุ 10 นาที)
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured')
+    }
+
+    const registrationToken = jwt.sign(
+      { userId: user.id, purpose: 'face-registration' },
+      JWT_SECRET,
+      { expiresIn: '10m' }
+    )
+
     // ส่งคืนผลลัพธ์ที่สำเร็จ (ไม่ส่ง password กลับ)
     return NextResponse.json({
       success: true,
       message: 'สมัครสมาชิกสำเร็จ',
+      registrationToken,
       user: {
         id: user.id,
         email: user.email,

@@ -14,8 +14,8 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState('')
   
   // Step 1: Identifier lookup
-  const [userId, setUserId] = useState<string | null>(null)
-  const [userFullName, setUserFullName] = useState('')
+  const [verificationToken, setVerificationToken] = useState<string | null>(null)
+  const [userFirstName, setUserFirstName] = useState('')
   const [showFaceModal, setShowFaceModal] = useState(false)
   
   // Step 2: Reset Token from Face scan
@@ -48,10 +48,10 @@ export default function ForgotPasswordPage() {
       const result = await response.json()
 
       if (response.ok && result.success) {
-        setUserId(result.userId)
-        setUserFullName(`${result.firstName} ${result.lastName}`)
+        setVerificationToken(result.verificationToken)
+        setUserFirstName(result.firstName || '')
         setShowFaceModal(true)
-        toast.success(`พบข้อมูลบัญชีของ ${result.firstName} กรุณายืนยันใบหน้า`)
+        toast.success(`พบข้อมูลบัญชีของ ${result.firstName || ''} กรุณายืนยันใบหน้า`)
       } else {
         setError(result.error || 'เกิดข้อผิดพลาดในการตรวจสอบบัญชี')
         toast.error(result.error || 'เกิดข้อผิดพลาดในการตรวจสอบบัญชี')
@@ -149,9 +149,11 @@ export default function ForgotPasswordPage() {
             <div>
               <div className="text-center mb-8">
                 <h2 className="text-2xl font-bold text-gray-950">ตั้งรหัสผ่านใหม่</h2>
-                <p className="mt-2 text-sm text-purple-700 font-medium">
-                  ยืนยันตัวตนบัญชีของ: {userFullName}
-                </p>
+                {userFirstName && (
+                  <p className="mt-2 text-sm text-purple-700 font-medium">
+                    ยืนยันตัวตนบัญชีของ: {userFirstName}
+                  </p>
+                )}
               </div>
 
               <form onSubmit={handleResetPassword} className="space-y-6">
@@ -242,14 +244,14 @@ export default function ForgotPasswordPage() {
       </div>
 
       {/* หน้าต่างสแกนใบหน้า (FaceReset Modal) */}
-      {showFaceModal && userId && (
+      {showFaceModal && verificationToken && (
         <FaceReset
           isOpen={showFaceModal}
-          userId={userId}
+          verificationToken={verificationToken}
           onSuccess={handleFaceSuccess}
           onCancel={() => {
             setShowFaceModal(false)
-            setUserId(null)
+            setVerificationToken(null)
           }}
         />
       )}
