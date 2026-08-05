@@ -96,14 +96,18 @@ export function useMultiEngineDetection() {
     const mpEndTime = performance.now()
     const mpLatency = Number((mpEndTime - mpStartTime).toFixed(1))
 
+    const activeLandmarks = mpData?.landmarks
+    const yaw = mpData?.orientation?.yaw || 0
+    const pitch = mpData?.orientation?.pitch || 0
+
     // 2. YOLOv8-Face
-    const yoloRes = yolov8Ref.current ? yolov8Ref.current.detect(video) : { isDetected: false, confidence: 0, latencyMs: 0, fps: 0 }
+    const yoloRes = yolov8Ref.current ? yolov8Ref.current.detect(video, activeLandmarks) : { isDetected: false, confidence: 0, latencyMs: 0, fps: 0 }
 
     // 3. Dlib 68-Point
-    const dlibRes = dlibRef.current ? dlibRef.current.detect(video) : { isDetected: false, landmarks68: [], confidence: 0, latencyMs: 0, fps: 0 }
+    const dlibRes = dlibRef.current ? dlibRef.current.detect(video, activeLandmarks) : { isDetected: false, landmarks68: [], confidence: 0, latencyMs: 0, fps: 0 }
 
     // 4. OpenFace
-    const openfaceRes = openfaceRef.current ? openfaceRef.current.detect(video) : {
+    const openfaceRes = openfaceRef.current ? openfaceRef.current.detect(video, activeLandmarks, yaw, pitch) : {
       isDetected: false,
       actionUnits: { au01_InnerBrowRaiser: 0, au02_OuterBrowRaiser: 0, au04_BrowLowerer: 0, au12_LipCornerPuller: 0, au26_JawDrop: 0, au45_Blink: 0 },
       gazeVector: { x: 0, y: 0, z: -1, eyeContact: false },

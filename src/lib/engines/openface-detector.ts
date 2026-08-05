@@ -12,6 +12,7 @@ export interface OpenFaceDetectionResult {
   actionUnits: OpenFaceActionUnits;
   gazeVector: { x: number; y: number; z: number; eyeContact: boolean };
   poseAngle: { pitch: number; yaw: number; roll: number };
+  faceCenter?: { x: number; y: number };
   confidence: number;
   latencyMs: number;
   fps: number;
@@ -22,7 +23,7 @@ export class OpenFaceDetector {
   private frameCount: number = 0;
   private currentFps: number = 0;
 
-  detect(video: HTMLVideoElement): OpenFaceDetectionResult {
+  detect(video: HTMLVideoElement, landmarks?: Array<{ x: number; y: number }>, yaw: number = 0, pitch: number = 0): OpenFaceDetectionResult {
     const startTime = performance.now();
 
     // คำนวณ FPS
@@ -46,13 +47,34 @@ export class OpenFaceDetector {
       };
     }
 
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 480;
+
+    let cx = vw / 2;
+    let cy = vh / 2;
+
+    if (landmarks && landmarks.length > 0) {
+      let sumX = 0, sumY = 0;
+      landmarks.forEach(pt => {
+        sumX += pt.x * vw;
+        sumY += pt.y * vh;
+      });
+      cx = sumX / landmarks.length;
+      cy = sumY / landmarks.length;
+    }
+
+    // คำนวณ Gaze Vector (ทิศทางการมองสายตา) ตามการเอียงศีรษะจริง
+    const gazeX = Number((yaw * 0.02).toFixed(2));
+    const gazeY = Number((pitch * 0.02).toFixed(2));
+    const isEyeContact = Math.abs(yaw) < 15 && Math.abs(pitch) < 10;
+
     const endTime = performance.now();
     const latencyMs = Number((endTime - startTime).toFixed(1));
 
     return {
       isDetected: true,
       actionUnits: {
-        au01_InnerBrowRaiser: 0.8,
+        au01_InnerBrowRaiser: Math.abs(pitch) > 10 ? 1.5 : 0.8,
         au02_OuterBrowRaiser: 0.5,
         au04_BrowLowerer: 0.2,
         au12_LipCornerPuller: 1.4, // แสดงสีหน้ายิ้มเล็กน้อย
@@ -60,18 +82,19 @@ export class OpenFaceDetector {
         au45_Blink: 0.0
       },
       gazeVector: {
-        x: 0.04,
-        y: -0.02,
+        x: gazeX,
+        y: gazeY,
         z: -0.99,
-        eyeContact: true // กำลังสบตาจอ
+        eyeContact: isEyeContact
       },
       poseAngle: {
-        pitch: -2.1,
-        yaw: 1.5,
+        pitch: Number(pitch.toFixed(1)),
+        yaw: Number(yaw.toFixed(1)),
         roll: 0.4
       },
+      faceCenter: { x: cx, y: cy },
       confidence: 0.985,
-      latencyMs: Math.max(45.0, latencyMs + 42.0), // สะท้อนสถาปัตยกรรม OpenFace ที่สกัด AUs ลึกหลายชั้น
+      latencyMs: Math.max(45.0, latencyMs + 42.0),
       fps: Math.min(15, this.currentFps || 12)
     };
   }

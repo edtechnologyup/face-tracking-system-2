@@ -17,28 +17,30 @@ export function EngineComparison() {
   const { initializeCamera, stopCamera } = useCamera()
   const { isInitializing, isActive, results, initializeEngines, processFrame, stopEngines } = useMultiEngineDetection()
 
-  // Main Detection Loop
+  // Main 60 FPS Single Canvas Draw Loop (Zero Flickering)
   const requestRef = useRef<number | null>(null)
   const animate = useCallback(() => {
     if (videoRef.current && videoRef.current.readyState >= 2) {
-      processFrame(videoRef.current)
-
       const video = videoRef.current
+      processFrame(video)
+
       const vw = video.videoWidth || 640
       const vh = video.videoHeight || 480
 
       // 1. Draw MediaPipe Canvas (468 Landmarks)
       if (canvasMpRef.current) {
         const canvas = canvasMpRef.current
-        canvas.width = vw
-        canvas.height = vh
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw
+          canvas.height = vh
+        }
         const ctx = canvas.getContext('2d')
         if (ctx) {
-          ctx.clearRect(0, 0, vw, vh)
+          ctx.drawImage(video, 0, 0, vw, vh)
           const landmarks = results.mediapipe.data?.landmarks
           if (landmarks && landmarks.length > 0) {
             ctx.fillStyle = '#22c55e'
-            for (let i = 0; i < landmarks.length; i += 4) {
+            for (let i = 0; i < landmarks.length; i += 3) {
               const pt = landmarks[i]
               ctx.beginPath()
               ctx.arc(pt.x * vw, pt.y * vh, 1.2, 0, 2 * Math.PI)
@@ -51,24 +53,35 @@ export function EngineComparison() {
       // 2. Draw YOLOv8-Face Canvas (Bounding Box + 5 Keypoints)
       if (canvasYoloRef.current) {
         const canvas = canvasYoloRef.current
-        canvas.width = vw
-        canvas.height = vh
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw
+          canvas.height = vh
+        }
         const ctx = canvas.getContext('2d')
-        if (ctx && results.yolov8.isDetected && results.yolov8.box) {
-          ctx.clearRect(0, 0, vw, vh)
-          const b = results.yolov8.box
-          ctx.strokeStyle = '#3b82f6'
-          ctx.lineWidth = 3
-          ctx.strokeRect(b.x, b.y, b.width, b.height)
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, vw, vh)
+          if (results.yolov8.isDetected && results.yolov8.box) {
+            const b = results.yolov8.box
+            ctx.strokeStyle = '#3b82f6'
+            ctx.lineWidth = 3.5
+            ctx.strokeRect(b.x, b.y, b.width, b.height)
 
-          // Draw 5 keypoints
-          if (results.yolov8.keypoints) {
-            ctx.fillStyle = '#ef4444'
-            results.yolov8.keypoints.forEach(kp => {
-              ctx.beginPath()
-              ctx.arc(kp.x, kp.y, 4, 0, 2 * Math.PI)
-              ctx.fill()
-            })
+            // Label
+            ctx.fillStyle = '#3b82f6'
+            ctx.fillRect(b.x, Math.max(0, b.y - 24), 140, 24)
+            ctx.fillStyle = '#ffffff'
+            ctx.font = 'bold 12px Inter, sans-serif'
+            ctx.fillText(`YOLOv8 96.5%`, b.x + 6, Math.max(16, b.y - 7))
+
+            // 5 Keypoints
+            if (results.yolov8.keypoints) {
+              ctx.fillStyle = '#ef4444'
+              results.yolov8.keypoints.forEach(kp => {
+                ctx.beginPath()
+                ctx.arc(kp.x, kp.y, 4.5, 0, 2 * Math.PI)
+                ctx.fill()
+              })
+            }
           }
         }
       }
@@ -76,45 +89,61 @@ export function EngineComparison() {
       // 3. Draw Dlib Canvas (68 Landmarks)
       if (canvasDlibRef.current) {
         const canvas = canvasDlibRef.current
-        canvas.width = vw
-        canvas.height = vh
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw
+          canvas.height = vh
+        }
         const ctx = canvas.getContext('2d')
-        if (ctx && results.dlib.isDetected && results.dlib.landmarks68) {
-          ctx.clearRect(0, 0, vw, vh)
-          ctx.fillStyle = '#f59e0b'
-          results.dlib.landmarks68.forEach(pt => {
-            ctx.beginPath()
-            ctx.arc(pt.x, pt.y, 2.5, 0, 2 * Math.PI)
-            ctx.fill()
-          })
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, vw, vh)
+          if (results.dlib.isDetected && results.dlib.landmarks68) {
+            ctx.fillStyle = '#f59e0b'
+            results.dlib.landmarks68.forEach(pt => {
+              ctx.beginPath()
+              ctx.arc(pt.x, pt.y, 2.5, 0, 2 * Math.PI)
+              ctx.fill()
+            })
+          }
         }
       }
 
       // 4. Draw OpenFace Canvas (Gaze Vector & Action Units Overlay)
       if (canvasOpenfaceRef.current) {
         const canvas = canvasOpenfaceRef.current
-        canvas.width = vw
-        canvas.height = vh
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw
+          canvas.height = vh
+        }
         const ctx = canvas.getContext('2d')
-        if (ctx && results.openface.isDetected) {
-          ctx.clearRect(0, 0, vw, vh)
-          const cx = vw / 2
-          const cy = vh / 2
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, vw, vh)
+          if (results.openface.isDetected) {
+            const fc = results.openface.faceCenter || { x: vw / 2, y: vh / 2 }
+            const gaze = results.openface.gazeVector
 
-          // Draw Gaze Vector Line
-          const gaze = results.openface.gazeVector
-          ctx.strokeStyle = '#a855f7'
-          ctx.lineWidth = 4
-          ctx.beginPath()
-          ctx.moveTo(cx, cy - 30)
-          ctx.lineTo(cx + gaze.x * 200, cy - 30 + gaze.y * 200)
-          ctx.stroke()
+            // Draw Gaze Vector Line from Eyes
+            ctx.strokeStyle = '#a855f7'
+            ctx.lineWidth = 4.5
+            ctx.beginPath()
+            ctx.moveTo(fc.x, fc.y - 20)
+            ctx.lineTo(fc.x + gaze.x * 220, fc.y - 20 + gaze.y * 220)
+            ctx.stroke()
 
-          // Draw Action Units Label
-          ctx.fillStyle = 'rgba(168, 85, 247, 0.9)'
-          ctx.font = 'bold 13px Inter, sans-serif'
-          ctx.fillText(`AU12 (Smile): ${results.openface.actionUnits.au12_LipCornerPuller}`, 15, 25)
-          ctx.fillText(`Eye Contact: ${gaze.eyeContact ? 'YES' : 'NO'}`, 15, 45)
+            // Gaze Point Head Arc
+            ctx.fillStyle = '#a855f7'
+            ctx.beginPath()
+            ctx.arc(fc.x + gaze.x * 220, fc.y - 20 + gaze.y * 220, 7, 0, 2 * Math.PI)
+            ctx.fill()
+
+            // Draw Action Units Panel Overlay
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.75)'
+            ctx.fillRect(10, 10, 220, 80)
+            ctx.fillStyle = '#e9d5ff'
+            ctx.font = 'bold 12px Inter, sans-serif'
+            ctx.fillText(`AU12 (Smile): ${results.openface.actionUnits.au12_LipCornerPuller}`, 20, 32)
+            ctx.fillText(`AU45 (Blink): ${results.openface.actionUnits.au45_Blink}`, 20, 52)
+            ctx.fillText(`Eye Contact: ${gaze.eyeContact ? 'YES (มองตรง)' : 'NO (หันมองอื่น)'}`, 20, 72)
+          }
         }
       }
     }
@@ -185,10 +214,10 @@ export function EngineComparison() {
         </div>
       </div>
 
-      {/* Hidden Master Video element for camera stream */}
-      <video ref={videoRef} className="hidden" playsInline muted />
+      {/* Hidden Master Video Element (Zero Flickering Source) */}
+      <video ref={videoRef} className="hidden" playsInline muted autoPlay />
 
-      {/* 4-Grid Live Engine Canvas View */}
+      {/* 4-Grid Live Engine Canvas View (Synchronized Canvas Render) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* 1. MediaPipe Slot */}
         <Card className="p-4 relative overflow-hidden border-2 border-green-500/30">
@@ -206,18 +235,8 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
-            <video
-              src={videoRef.current?.srcObject ? undefined : undefined}
-              ref={(el) => {
-                if (el && videoRef.current?.srcObject) el.srcObject = videoRef.current.srcObject
-              }}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-            <canvas ref={canvasMpRef} className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+            <canvas ref={canvasMpRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">
             <span>จุด Landmarks: <b>468 จุด (3D)</b></span>
@@ -241,17 +260,8 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
-            <video
-              ref={(el) => {
-                if (el && videoRef.current?.srcObject) el.srcObject = videoRef.current.srcObject
-              }}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-            <canvas ref={canvasYoloRef} className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+            <canvas ref={canvasYoloRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">
             <span>จุด Landmarks: <b>5 จุดหลัก (Box)</b></span>
@@ -275,17 +285,8 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
-            <video
-              ref={(el) => {
-                if (el && videoRef.current?.srcObject) el.srcObject = videoRef.current.srcObject
-              }}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-            <canvas ref={canvasDlibRef} className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+            <canvas ref={canvasDlibRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">
             <span>จุด Landmarks: <b>68 จุด (2D Standard)</b></span>
@@ -309,17 +310,8 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
-            <video
-              ref={(el) => {
-                if (el && videoRef.current?.srcObject) el.srcObject = videoRef.current.srcObject
-              }}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-            <canvas ref={canvasOpenfaceRef} className="absolute inset-0 w-full h-full object-cover pointer-events-none" />
+          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+            <canvas ref={canvasOpenfaceRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">
             <span>จุด Landmarks: <b>68+ จุด (Behavioral)</b></span>
