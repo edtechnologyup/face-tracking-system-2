@@ -72,23 +72,24 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   const performFaceVerification = useCallback(async () => {
     if (!videoRef.current || !isFaceApiLoaded) return
 
+    // หากขณะนี้ผู้สอบหันหน้าไปทางอื่น (ไม่ใช่ CENTER) ให้ข้ามการตรวจสวมสิทธิ์เพื่อป้องกัน false positive
+    if (currentData?.orientation && currentData.orientation.direction !== 'CENTER') {
+      return
+    }
+
     try {
       const userData = localStorage.getItem('user')
       const userId = userData ? JSON.parse(userData).id : null
       if (!userId) {
-        console.warn('🔒 [Security System] ไม่พบข้อมูลผู้ใช้ใน localStorage')
         return
       }
 
-      console.log('🔒 [Security System] กำลังตรวจจับและเทียบใบหน้าเบื้องหลัง...')
-      // ดึง face descriptor ของบุคคลปัจจุบันในกล้อง (จะโยน error หากไม่พบใบหน้าใดๆ เลย)
       const descriptor = await detectFaceAndGetDescriptor(videoRef.current, true)
       if (!descriptor || descriptor.length !== 128) {
-        console.warn('🔒 [Security System] ไม่สามารถสร้าง Face Descriptor ได้')
+        consecutiveMismatches.current = 0
         return
       }
 
-      console.log('🔒 [Security System] ส่งข้อมูลไปเทียบที่ API...')
       const token = localStorage.getItem('token')
       const response = await fetch('/api/auth/face-verify', {
         method: 'POST',
@@ -98,19 +99,13 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         },
         body: JSON.stringify({
           faceData: descriptor,
-          singlePoseVerification: true // ยืนยันว่าคนหน้ากล้องตรงกับผู้สอบหรือไม่
+          singlePoseVerification: true
         })
       })
 
       const result = await response.json()
 
       if (response.ok) {
-        console.log('🔒 [Security System] ผลการเปรียบเทียบ:', {
-          isMatch: result.isMatch,
-          distance: result.distance,
-          threshold: result.threshold
-        })
-
         if (result.isMatch) {
           // ถ้าใบหน้าตรงกัน
           consecutiveMismatches.current = 0
@@ -118,11 +113,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
             console.log('🔒 [Security System] ผู้สอบตัวจริงกลับมาเข้าระบบแล้ว ปลดล็อกสถานะ mismatch')
             setIsMismatchDetected(false)
             
-            // ถ้าหากเคยมีสถานะ mismatch ก่อนหน้านี้ ให้คำนวณระยะเวลาแล้วบันทึก event ลง database
             if (activeMismatchStartTime.current) {
               const endTime = new Date().toLocaleTimeString('th-TH', { hour12: false })
               
-              // คำนวณระยะเวลา (วินาที)
               const [startH, startM, startS] = activeMismatchStartTime.current.split(':').map(Number)
               const [endH, endM, endS] = endTime.split(':').map(Number)
               const startMs = (startH * 3600 + startM * 60 + startS) * 1000
@@ -134,12 +127,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
             }
           }
         } else {
-          // ถ้าใบหน้าไม่ตรงกัน
+          // ถ้าใบหน้าไม่ตรงกัน (ต้องไม่ตรงกันต่อเนื่องอย่างน้อย 3 ครั้งที่มองตรง CENTER)
           consecutiveMismatches.current += 1
           console.warn(`🔒 [Security System] ⚠️ ตรวจพบใบหน้าไม่ตรงกับผู้สอบ! ครั้งที่ ${consecutiveMismatches.current}`)
           
-          // ตรวจจับและเก็บข้อมูลทันทีตั้งแต่ครั้งแรกเพื่อความปลอดภัยสูงสุดและรวดเร็ว
-          if (consecutiveMismatches.current >= 1) {
+          if (consecutiveMismatches.current >= 3) {
             if (!isMismatchDetected) {
               console.warn('🔒 [Security System] 🚨 ยืนยันพบการสวมสิทธิ์สอบ! บันทึกช่วงเวลาสวมสิทธิ์ในฐานข้อมูล')
               setIsMismatchDetected(true)
@@ -148,16 +140,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           }
         }
       }
-    } catch (error) {
-      // หากเกิด error เช่น "ไม่พบใบหน้า" (ห้องว่าง) เราจะไม่นับเป็น mismatch และข้ามไป
-      const message = error instanceof Error ? error.message : String(error)
-      if (message.includes("ไม่พบใบหน้า") || message.includes("คุณภาพการตรวจจับใบหน้าไม่เพียงพอ")) {
-        console.log('🔒 [Security System] Background verification: ไม่พบใบหน้าผู้สอบในกล้อง (ข้ามการตรวจสอบ)')
-      } else {
-        console.warn('🔒 [Security System] Background verification error:', message)
-      }
+    } catch {
+      // หากเกิด error เช่น ไม่พบใบหน้า ให้รีเซ็ต counter และข้ามไป ไม่นับเป็น mismatch
+      consecutiveMismatches.current = 0
     }
-  }, [isFaceApiLoaded, isMismatchDetected, recordFaceMismatchEvent])
+  }, [videoRef, isFaceApiLoaded, currentData, isMismatchDetected, recordFaceMismatchEvent])
 
   // ระบบตรวจสอบใบหน้าผู้สอบแบบวนซ้ำเป็นระยะ (ความถี่ทุก 2 วินาที เพื่อการตอบสนองที่รวดเร็ว)
   useEffect(() => {
