@@ -129,7 +129,7 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
     return colors[direction] || 'bg-gray-100 text-gray-800'
   }
 
-  const getCalculatedDuration = (data?: Record<string, unknown>) => {
+  const getCalculatedDuration = (data?: Record<string, unknown>): number => {
     if (!data) return 0
     if (typeof data.duration === 'number' && data.duration > 0) {
       return data.duration
@@ -142,7 +142,7 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
       if (!isNaN(sH) && !isNaN(eH)) {
         const startMs = (sH * 3600 + sM * 60 + sS) * 1000
         const endMs = (eH * 3600 + eM * 60 + eS) * 1000
-        return Math.max(0, Math.round((endMs - startMs) / 1000))
+        return Math.max(0, (endMs - startMs) / 1000)
       }
     }
     return typeof data.duration === 'number' ? data.duration : 0
@@ -262,27 +262,27 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
           <div className="text-center p-3 bg-purple-50 rounded-lg flex-1 min-w-[120px]">
             <p className="text-xl font-bold text-purple-600">{sessionDetail.stats.directionCounts.UP}</p>
             <p className="text-xs text-gray-600">เงยหน้า</p>
-            <p className="text-xs text-purple-600 font-semibold">{sessionDetail.stats.directionDurations.UP}s</p>
+            <p className="text-xs text-purple-600 font-semibold">{Number(sessionDetail.stats.directionDurations.UP || 0).toFixed(1)}s</p>
           </div>
           <div className="text-center p-3 bg-yellow-50 rounded-lg flex-1 min-w-[120px]">
             <p className="text-xl font-bold text-yellow-600">{sessionDetail.stats.directionCounts.DOWN}</p>
             <p className="text-xs text-gray-600">ก้มหน้า</p>
-            <p className="text-xs text-yellow-600 font-semibold">{sessionDetail.stats.directionDurations.DOWN}s</p>
+            <p className="text-xs text-yellow-600 font-semibold">{Number(sessionDetail.stats.directionDurations.DOWN || 0).toFixed(1)}s</p>
           </div>
           <div className="text-center p-3 bg-orange-50 rounded-lg flex-1 min-w-[120px]">
             <p className="text-xl font-bold text-orange-600">{sessionDetail.stats.directionCounts.LEFT}</p>
             <p className="text-xs text-gray-600">หันซ้าย</p>
-            <p className="text-xs text-orange-600 font-semibold">{sessionDetail.stats.directionDurations.LEFT}s</p>
+            <p className="text-xs text-orange-600 font-semibold">{Number(sessionDetail.stats.directionDurations.LEFT || 0).toFixed(1)}s</p>
           </div>
           <div className="text-center p-3 bg-pink-50 rounded-lg flex-1 min-w-[120px]">
             <p className="text-xl font-bold text-pink-600">{sessionDetail.stats.directionCounts.RIGHT}</p>
             <p className="text-xs text-gray-600">หันขวา</p>
-            <p className="text-xs text-pink-600 font-semibold">{sessionDetail.stats.directionDurations.RIGHT}s</p>
+            <p className="text-xs text-pink-600 font-semibold">{Number(sessionDetail.stats.directionDurations.RIGHT || 0).toFixed(1)}s</p>
           </div>
           
           {/* Total Behavior Duration */}
           <div className="text-center p-3 bg-indigo-50 rounded-lg flex-1 min-w-[120px]">
-            <p className="text-xl font-bold text-indigo-600">{sessionDetail.stats.totalBehaviorDuration}s</p>
+            <p className="text-xl font-bold text-indigo-600">{Number(sessionDetail.stats.totalBehaviorDuration || 0).toFixed(1)}s</p>
             <p className="text-xs text-gray-600">รวมเวลาทั้งหมด</p>
           </div>
         </div>
@@ -331,7 +331,7 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
                           {(log.detectionData.startTime as string) && (log.detectionData.endTime as string) && (
                             <div>⏱️ <b>ช่วงเวลา:</b> {log.detectionData.startTime as string} - {log.detectionData.endTime as string}</div>
                           )}
-                          <div>⏳ <b>ระยะเวลา:</b> {getCalculatedDuration(log.detectionData as Record<string, unknown>)} วินาที</div>
+                          <div>⏳ <b>ระยะเวลา:</b> {getCalculatedDuration(log.detectionData as Record<string, unknown>).toFixed(1)} วินาที</div>
                           {(log.detectionData.maxYaw as number) !== undefined && log.detectionData.maxYaw !== null && (
                             <div>📐 <b>มุมหันซ้าย-ขวา (Yaw):</b> {(log.detectionData.maxYaw as number).toFixed(1)}°</div>
                           )}
