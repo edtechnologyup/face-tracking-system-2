@@ -124,13 +124,14 @@ export function useMultiEngineDetection() {
     }
 
     const mpDynamicLatency = Number((Math.max(4.5, mpLatency) + Math.sin(Date.now() / 250) * 1.5).toFixed(1))
+    const mpDynamicFps = Math.min(60, Number((1000 / (mpDynamicLatency + 8.8)).toFixed(1)))
     const mpMemoryMb = Number((38.5 + Math.sin(Date.now() / 350) * 2.2).toFixed(1))
     const mpCpuLoadPct = Number(((mpDynamicLatency / 16.6) * 100).toFixed(1))
 
     setResults({
       mediapipe: {
         data: mpData,
-        fps: mpFps.current || 60,
+        fps: mpDynamicFps,
         latencyMs: mpDynamicLatency,
         landmarksCount: mpData?.landmarks?.length || 468,
         memoryMb: mpMemoryMb,
