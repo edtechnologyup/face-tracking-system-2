@@ -4,22 +4,13 @@ import { FaceTrackingData } from '@/lib/mediapipe-detector'
 interface DetectionStatsProps {
   data: FaceTrackingData | null
   isActive: boolean
-  isMismatchDetected?: boolean
 }
 
-export function DetectionStats({ data, isActive, isMismatchDetected }: DetectionStatsProps) {
+export function DetectionStats({ data, isActive }: DetectionStatsProps) {
   if (!isActive || !data) return null
 
   // กำหนดสถานะปัจจุบันแบบรวม (Primary Status) เพื่อแสดงผลให้ผู้ใช้ทราบอย่างชัดเจน
   const getPrimaryStatus = () => {
-    if (isMismatchDetected) {
-      return {
-        label: '🚨 ตรวจพบใบหน้าอื่น (เสี่ยงการสวมสิทธิ์สอบ)',
-        subtext: 'ใบหน้าในกล้องไม่ตรงกับผู้เข้าสอบที่ลงทะเบียนไว้',
-        bgColor: 'bg-red-500 text-white border-red-600',
-        badgeColor: 'bg-red-700 text-white'
-      }
-    }
     if (!data.isDetected) {
       return {
         label: '❌ ไม่พบใบหน้าในกล้อง (Loss of Face)',

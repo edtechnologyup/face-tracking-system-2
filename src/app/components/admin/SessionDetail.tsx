@@ -91,11 +91,7 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
     return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  const getDetectionTypeLabel = (type: string, log?: TrackingLog) => {
-    const isMismatch = log?.detectionData && (log.detectionData as Record<string, unknown> & { isMismatch?: boolean }).isMismatch
-    if (type === 'FACE_DETECTION_LOSS' && isMismatch) {
-      return 'ใบหน้าไม่ตรงกับผู้สอบ'
-    }
+  const getDetectionTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
       'FACE_ORIENTATION': 'การเปลี่ยนทิศทางใบหน้า',
       'FACE_DETECTION_LOSS': 'การสูญเสียการตรวจจับใบหน้า'
@@ -103,11 +99,7 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
     return labels[type] || type
   }
 
-  const getDetectionTypeColor = (type: string, log?: TrackingLog) => {
-    const isMismatch = log?.detectionData && (log.detectionData as Record<string, unknown> & { isMismatch?: boolean }).isMismatch
-    if (type === 'FACE_DETECTION_LOSS' && isMismatch) {
-      return 'bg-orange-100 text-orange-800 border border-orange-200'
-    }
+  const getDetectionTypeColor = (type: string) => {
     const colors: Record<string, string> = {
       'FACE_ORIENTATION': 'bg-blue-100 text-blue-800',
       'FACE_DETECTION_LOSS': 'bg-red-100 text-red-800'
@@ -298,9 +290,9 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      getDetectionTypeColor(log.detectionType, log)
+                      getDetectionTypeColor(log.detectionType)
                     }`}>
-                      {getDetectionTypeLabel(log.detectionType, log)}
+                      {getDetectionTypeLabel(log.detectionType)}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -317,9 +309,6 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
                           </span>
                         )}
                         <div className="text-xs text-gray-400 mt-1">
-                          {(log.detectionData as Record<string, unknown> & { isMismatch?: boolean }).isMismatch && (
-                            <div className="text-red-600 font-semibold mb-1">⚠️ ตรวจพบใบหน้าอื่น (ไม่ใช่ผู้เข้าสอบ)</div>
-                          )}
                           {(log.detectionData.startTime as string) && (log.detectionData.endTime as string) && (
                             <div>เวลา: {log.detectionData.startTime as string} - {log.detectionData.endTime as string}</div>
                           )}

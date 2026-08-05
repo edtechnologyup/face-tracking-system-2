@@ -9,7 +9,6 @@ import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
 import { useFaceDetection } from '@/hooks/useFaceDetection'
 import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
-import { loadFaceApiModels, detectFaceAndGetDescriptor } from '@/lib/face-api/detection'
 import toast from 'react-hot-toast'
 
 interface FaceTrackerProps {
@@ -43,166 +42,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     getCurrentStats,
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
-    getOrientationHistory,
-    recordFaceMismatchEvent
+    getOrientationHistory
   } = useFaceDetection()
 
-  // State สำหรับควบคุมระบบเปรียบเทียบใบหน้าคนสวมสิทธิ์
-  const [isMismatchDetected, setIsMismatchDetected] = useState(false)
-  const [isFaceApiLoaded, setIsFaceApiLoaded] = useState(false)
-  const consecutiveMismatches = useRef(0)
-  const activeMismatchStartTime = useRef<string | null>(null)
 
-  // โหลดโมเดล face-api สำหรับยืนยันตัวตนคนสวมสิทธิ์
-  useEffect(() => {
-    async function loadModels() {
-      try {
-        console.log('⏳ กำลังโหลดโมเดล face-api สำหรับตรวจจับคนสวมสิทธิ์...')
-        await loadFaceApiModels()
-        setIsFaceApiLoaded(true)
-        console.log('✅ โหลดโมเดล face-api สำเร็จ')
-      } catch (err) {
-        console.error('❌ ไม่สามารถโหลดโมเดล face-api ได้:', err)
-      }
-    }
-    loadModels()
-  }, [])
-
-  // ฟังก์ชันสแกนและเปรียบเทียบใบหน้ากับเจ้าของบัญชี
-  const performFaceVerification = useCallback(async () => {
-    if (!videoRef.current || !isFaceApiLoaded) return
-
-    // 1. หากขณะนี้ผู้สอบหันหน้าไปทางอื่น (ไม่ใช่ CENTER) ให้ข้ามการตรวจสวมสิทธิ์เพื่อป้องกัน false positive
-    if (currentData?.orientation && currentData.orientation.direction !== 'CENTER') {
-      return
-    }
-
-    // 2. หากขณะนี้ตรวจไม่พบใบหน้า ให้รีเซ็ต counter และข้ามการตรวจสอบ
-    if (!currentData?.isDetected) {
-      consecutiveMismatches.current = 0
-      return
-    }
-
-    try {
-      const userData = localStorage.getItem('user')
-      const userId = userData ? JSON.parse(userData).id : null
-      if (!userId) {
-        return
-      }
-
-      // ดึง face descriptor โดยทำการ validate ความชัดของใบหน้าเบื้องต้น (skipValidation = false)
-      const descriptor = await detectFaceAndGetDescriptor(videoRef.current, false)
-      if (!descriptor || descriptor.length !== 128) {
-        consecutiveMismatches.current = 0
-        return
-      }
-
-      const token = localStorage.getItem('token')
-      const response = await fetch('/api/auth/face-verify', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          faceData: descriptor,
-          singlePoseVerification: true
-        })
-      })
-
-      const result = await response.json()
-
-      if (response.ok) {
-        if (result.isMatch) {
-          // ถ้าใบหน้าตรงกัน
-          consecutiveMismatches.current = 0
-          if (isMismatchDetected) {
-            console.log('🔒 [Security System] ผู้สอบตัวจริงกลับมาเข้าระบบแล้ว ปลดล็อกสถานะ mismatch')
-            setIsMismatchDetected(false)
-            
-            if (activeMismatchStartTime.current) {
-              const endTime = new Date().toLocaleTimeString('th-TH', { hour12: false })
-              
-              const [startH, startM, startS] = activeMismatchStartTime.current.split(':').map(Number)
-              const [endH, endM, endS] = endTime.split(':').map(Number)
-              const startMs = (startH * 3600 + startM * 60 + startS) * 1000
-              const endMs = (endH * 3600 + endM * 60 + endS) * 1000
-              const duration = Math.max(1, Math.round((endMs - startMs) / 1000))
-              
-              recordFaceMismatchEvent(activeMismatchStartTime.current, endTime, duration)
-              activeMismatchStartTime.current = null
-            }
-          }
-        } else {
-          // ถ้าใบหน้าไม่ตรงกัน (ต้องมองตรง CENTER ชัดเจน และไม่ตรงกันต่อเนื่องอย่างน้อย 4 ครั้ง)
-          consecutiveMismatches.current += 1
-          console.warn(`🔒 [Security System] ⚠️ ตรวจพบใบหน้าไม่ตรงกับผู้สอบ! ครั้งที่ ${consecutiveMismatches.current}`)
-          
-          if (consecutiveMismatches.current >= 4) {
-            if (!isMismatchDetected) {
-              console.warn('🔒 [Security System] 🚨 ยืนยันพบการสวมสิทธิ์สอบ! บันทึกช่วงเวลาสวมสิทธิ์ในฐานข้อมูล')
-              setIsMismatchDetected(true)
-              activeMismatchStartTime.current = new Date().toLocaleTimeString('th-TH', { hour12: false })
-            }
-          }
-        }
-      }
-    } catch {
-      // หากเกิด error เช่น ไม่พบใบหน้า หรือแสงไม่เพียงพอ ให้รีเซ็ต counter
-      consecutiveMismatches.current = 0
-    }
-  }, [videoRef, isFaceApiLoaded, currentData, isMismatchDetected, recordFaceMismatchEvent])
-
-  // ระบบตรวจสอบใบหน้าผู้สอบแบบวนซ้ำเป็นระยะ (ความถี่ทุก 2 วินาที เพื่อการตอบสนองที่รวดเร็ว)
-  useEffect(() => {
-    let matchInterval: NodeJS.Timeout | null = null
-
-    if (isActive && isRecording && isFaceApiLoaded) {
-      console.log('🔒 [Security System] เริ่มต้นระบบตรวจสอบใบหน้าผู้เข้าสอบแบบวนซ้ำ (เช็คทุก 2 วินาที)')
-      
-      // รันเช็คครั้งแรกทันทีที่เริ่มบันทึก
-      performFaceVerification()
-
-      matchInterval = setInterval(performFaceVerification, 2000)
-    }
-
-    return () => {
-      if (matchInterval) {
-        clearInterval(matchInterval)
-      }
-    }
-  }, [isActive, isRecording, isFaceApiLoaded, performFaceVerification])
-
-  // ตัวแปรเก็บสถานะใบหน้าก่อนหน้าเพื่อเปรียบเทียบหาการเปลี่ยนแปลงในทันที
-  const prevFaceState = useRef({ isDetected: false, count: 0 })
-  const isVerifyingRef = useRef(false) // ตัวป้องกันการเรียกซ้อนกัน
-
-  // ตรวจจับการเปลี่ยนแปลงพฤติกรรมในกล้อง เพื่อตรวจสอบอัตลักษณ์ใบหน้าทันที (ความเร็วระดับมิลลิวินาที)
-  useEffect(() => {
-    if (!currentData || !isFaceApiLoaded || !isRecording) return
-
-    const currDetected = currentData.isDetected
-    const currCount = currentData.multipleFaces?.count || 0
-    const prev = prevFaceState.current
-
-    // เงื่อนไขกระตุ้นเช็คทันที:
-    // 1. มีใบหน้าโผล่เข้ามาใหม่ (เปลี่ยนจากจับไม่ได้ -> จับได้)
-    // 2. จำนวนใบหน้าในกล้องเกิดการเปลี่ยนแปลง (มีคนเดินเข้ามาเพิ่ม หรือคนเก่าเดินออก)
-    if ((!prev.isDetected && currDetected) || (prev.count !== currCount)) {
-      if (!isVerifyingRef.current) {
-        isVerifyingRef.current = true
-        console.log('🔒 [Security System] [Instant Trigger] ตรวจพบใบหน้าเข้า/ออกจากกล้อง! กำลังสแกนยืนยันตัวตนทันที...')
-        
-        // ดีเลย์เล็กน้อย 200ms เพื่อให้กล้องโฟกัสใบหน้าของคนใหม่ที่เพิ่งเข้ามาให้ชัดเจน
-        setTimeout(async () => {
-          await performFaceVerification()
-          isVerifyingRef.current = false
-        }, 200)
-      }
-    }
-
-    prevFaceState.current = { isDetected: currDetected, count: currCount }
-  }, [currentData, isFaceApiLoaded, isRecording, performFaceVerification])
 
 
   // วาดการแสดงผลบน canvas
@@ -441,20 +284,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
   // หยุดบันทึกและแสดงผลลัพธ์
   const handleStopRecording = useCallback(async () => {
-    // บันทึก mismatch event ที่ยังค้างอยู่ก่อนจบ session
-    if (activeMismatchStartTime.current) {
-      const endTime = new Date().toLocaleTimeString('th-TH', { hour12: false })
-      const [startH, startM, startS] = activeMismatchStartTime.current.split(':').map(Number)
-      const [endH, endM, endS] = endTime.split(':').map(Number)
-      const startMs = (startH * 3600 + startM * 60 + startS) * 1000
-      const endMs = (endH * 3600 + endM * 60 + endS) * 1000
-      const duration = Math.max(1, Math.round((endMs - startMs) / 1000))
-      
-      recordFaceMismatchEvent(activeMismatchStartTime.current, endTime, duration)
-      activeMismatchStartTime.current = null
-      setIsMismatchDetected(false)
-    }
-
     const events = stopRecording()
     const stats = getCurrentStats()
     const faceDetectionLossStats = getFaceDetectionLossStats()
@@ -516,7 +345,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       }
       alert(`หยุดติดตามแล้ว!\n\nสรุปผลลัพธ์:\n• หันซ้าย: ${statsData?.leftTurns?.count || 0} ครั้ง (${statsData?.leftTurns?.totalDuration || 0} วิ)\n• หันขวา: ${statsData?.rightTurns?.count || 0} ครั้ง (${statsData?.rightTurns?.totalDuration || 0} วิ)\n• ก้มหน้า: ${statsData?.lookingDown?.count || 0} ครั้ง (${statsData?.lookingDown?.totalDuration || 0} วิ)\n• เงยหน้า: ${statsData?.lookingUp?.count || 0} ครั้ง (${statsData?.lookingUp?.totalDuration || 0} วิ)\n• รวม events: ${statsData?.totalEvents || 0} ครั้ง\n\n⚠️ สถานะถูกเปลี่ยนเป็น "หยุดการบันทึกกลางคัน"`)
     }
-  }, [stopRecording, getCurrentStats, currentSessionId, saveOrientationData, endTrackingSession, getFaceDetectionLossStats, getFaceDetectionLossEvents, recordFaceMismatchEvent])
+  }, [stopRecording, getCurrentStats, currentSessionId, saveOrientationData, endTrackingSession, getFaceDetectionLossStats, getFaceDetectionLossEvents])
 
   // หยุดการติดตาม
   const stopTracking = useCallback(async () => {
@@ -694,7 +523,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         </div>
 
         {/* Current Detection Status */}
-        <DetectionStats data={currentData} isActive={isActive} isMismatchDetected={isMismatchDetected} />
+        <DetectionStats data={currentData} isActive={isActive} />
 
         {/* API Error Display */}
         {apiError && (
