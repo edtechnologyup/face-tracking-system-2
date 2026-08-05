@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import jwt from 'jsonwebtoken'
 import { getThailandTime, calculateDurationInSeconds } from '@/lib/utils/datetime'
 
+import { autoCloseStaleSessions } from '@/lib/utils/session-cleanup'
+
 // Interface สำหรับ request body
 interface CreateSessionRequest {
   sessionName: string;
@@ -36,6 +38,9 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
     }
+
+    // เคลียร์และปิดเซสชันเดิมที่ค้างอยู่ของ user คนนี้โดยอัตโนมัติก่อนเริ่มเซสชันใหม่
+    await autoCloseStaleSessions(userId)
 
     const body: CreateSessionRequest = await request.json()
     const { sessionName } = body
@@ -182,6 +187,9 @@ export async function GET(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
     }
+
+    // เคลียร์และปิดเซสชันที่ค้างเกิน 60 วินาทีโดยอัตโนมัติก่อนดึงข้อมูล
+    await autoCloseStaleSessions()
 
     // ดึงข้อมูล sessions ของ user
     const sessions = await prisma.trackingSession.findMany({

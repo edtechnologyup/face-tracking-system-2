@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import jwt from 'jsonwebtoken'
 
+import { autoCloseStaleSessions } from '@/lib/utils/session-cleanup'
+
 export async function GET(request: NextRequest) {
   try {
     // ตรวจสอบ Authorization header
@@ -47,12 +49,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // เคลียร์และปิดเซสชันที่ค้างเกิน 60 วินาทีให้อัตโนมัติก่อนประมวลผลสถิติ
+    await autoCloseStaleSessions()
+
     // ดึงข้อมูลสถิติพื้นฐาน (ใช้ count ซึ่งเป็น DB aggregation อยู่แล้ว)
     const [totalUsers, totalAdmins, totalSessions, activeSessions, interruptedSessions] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { role: 'ADMIN' } }),
       prisma.trackingSession.count(),
-      prisma.trackingSession.count({ where: { endTime: null } }),
+      prisma.trackingSession.count({ where: { status: 'IN_PROGRESS' } }),
       prisma.trackingSession.count({ where: { status: 'DISCONNECTED' } })
     ])
 

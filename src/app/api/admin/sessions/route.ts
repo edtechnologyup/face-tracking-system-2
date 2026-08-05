@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import jwt from 'jsonwebtoken'
+import { autoCloseStaleSessions } from '@/lib/utils/session-cleanup'
 
 export async function GET(request: NextRequest) {
   try {
@@ -38,6 +39,9 @@ export async function GET(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    // เคลียร์และปิดเซสชันที่ค้างเกิน 60 วินาทีให้อัตโนมัติ
+    await autoCloseStaleSessions()
 
     // ดึงข้อมูลเซสชันทั้งหมด
     const sessions = await prisma.trackingSession.findMany({
