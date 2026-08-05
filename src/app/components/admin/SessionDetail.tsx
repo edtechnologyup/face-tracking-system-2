@@ -327,16 +327,25 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
                             {getDirectionLabel(log.detectionData.direction as string)}
                           </span>
                         )}
-                        <div className="text-xs text-gray-400 mt-1">
+                        <div className="text-xs text-gray-500 mt-1.5 space-y-1 bg-gray-50 p-2.5 rounded-lg border border-gray-100">
                           {(log.detectionData.startTime as string) && (log.detectionData.endTime as string) && (
-                            <div>เวลา: {log.detectionData.startTime as string} - {log.detectionData.endTime as string}</div>
+                            <div>⏱️ <b>ช่วงเวลา:</b> {log.detectionData.startTime as string} - {log.detectionData.endTime as string}</div>
                           )}
-                          <div>ระยะเวลา: {getCalculatedDuration(log.detectionData as Record<string, unknown>)}s</div>
+                          <div>⏳ <b>ระยะเวลา:</b> {getCalculatedDuration(log.detectionData as Record<string, unknown>)} วินาที</div>
                           {(log.detectionData.maxYaw as number) !== undefined && log.detectionData.maxYaw !== null && (
-                            <div>Yaw: {(log.detectionData.maxYaw as number).toFixed(1)}°</div>
+                            <div>📐 <b>มุมหันซ้าย-ขวา (Yaw):</b> {(log.detectionData.maxYaw as number).toFixed(1)}°</div>
                           )}
                           {(log.detectionData.maxPitch as number) !== undefined && log.detectionData.maxPitch !== null && (
-                            <div>Pitch: {(log.detectionData.maxPitch as number).toFixed(1)}°</div>
+                            <div>📐 <b>มุมก้ม-เงย (Pitch):</b> {(log.detectionData.maxPitch as number).toFixed(1)}°</div>
+                          )}
+                          {log.confidence && (
+                            <div>🎯 <b>ความแม่นยำ AI (Confidence):</b> {(log.confidence * 100).toFixed(1)}%</div>
+                          )}
+                          {(log.detectionData.distanceCm as number) && (
+                            <div>📏 <b>ระยะห่างจากกล้อง:</b> {log.detectionData.distanceCm as number} cm</div>
+                          )}
+                          {(log.detectionData.facesCount as number) && (
+                            <div>👥 <b>จำนวนใบหน้าในกล้อง:</b> {log.detectionData.facesCount as number} คน</div>
                           )}
                         </div>
                       </div>
