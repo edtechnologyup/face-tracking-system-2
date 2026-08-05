@@ -378,6 +378,25 @@ export function EngineComparison() {
                 </td>
               </tr>
               <tr>
+                <td className="px-4 py-3 font-semibold text-gray-900">ความแม่นยำ (Accuracy / Metric)</td>
+                <td className="px-4 py-3 text-green-700 bg-green-50/30">
+                  <div className="font-bold">🟢 98.5% (NME 2.3%)</div>
+                  <div className="text-xs text-gray-500">WFLW 3D Landmark Benchmark</div>
+                </td>
+                <td className="px-4 py-3 text-blue-700 bg-blue-50/30">
+                  <div className="font-bold">🟢 96.5% (mAP 94.8%)</div>
+                  <div className="text-xs text-gray-500">WIDER FACE Detection Metric</div>
+                </td>
+                <td className="px-4 py-3 text-amber-700 bg-amber-50/30">
+                  <div className="font-bold">🟡 91.0% (NME 5.4%)</div>
+                  <div className="text-xs text-gray-500">300W 68-Point Standard Metric</div>
+                </td>
+                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">
+                  <div className="font-bold">🟢 98.5% (F1 0.86)</div>
+                  <div className="text-xs text-gray-500">DISFA Action Units & Gaze Metric</div>
+                </td>
+              </tr>
+              <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">ความลึกพฤติกรรม (Action Units)</td>
                 <td className="px-4 py-3 text-green-700 bg-green-50/30">🟡 ปานกลาง (Head Pose)</td>
                 <td className="px-4 py-3 text-blue-700 bg-blue-50/30">🔴 ไม่มี (เน้นตรวจจับกรอบ)</td>
