@@ -15,6 +15,17 @@ interface OrientationEvent {
   isActive: boolean;
 }
 
+interface SecurityViolationItem {
+  id?: string;
+  type: string; // 'MULTI_FACE_DETECTED' | 'LOOKING_AWAY_EXCEEDED' | 'FACE_LOSS' | 'FACE_MISMATCH' etc.
+  message: string;
+  timestamp: string;
+  severity: 'WARNING' | 'CRITICAL';
+  faceCount?: number;
+  duration?: number;
+  details?: Record<string, unknown>;
+}
+
 interface OrientationLogRequest {
   sessionId: string;
   events: OrientationEvent[];
@@ -40,6 +51,7 @@ interface OrientationLogRequest {
     isMismatch?: boolean;
     reason?: string;
   }>;
+  securityViolations?: SecurityViolationItem[];
 }
 
 // บันทึกข้อมูล orientation tracking
@@ -67,7 +79,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: OrientationLogRequest = await request.json()
-    const { sessionId, events, sessionStats, faceDetectionLoss, faceDetectionLossEvents } = body
+    const { sessionId, events, sessionStats, faceDetectionLoss, faceDetectionLossEvents, securityViolations } = body
 
     // ตรวจสอบว่า session มีอยู่และเป็นของ user คนนี้
     const session = await prisma.trackingSession.findFirst({
@@ -124,7 +136,31 @@ export async function POST(request: NextRequest) {
       console.log(`🚨 ตรวจพบ Face Detection Loss: ${lossLogsCount} events, รวม ${faceDetectionLoss?.totalLossTime || 0} วินาที`)
     }
 
-    // 3. ทำการบันทึกข้อมูลอย่างถูกต้อง (ลบ log เก่าของ session เพื่อกันข้อมูลซ้ำจากการ auto-sync แล้วลง log ชุดใหม่ล่าสุด)
+    // 3. เพิ่ม Security Violation Events
+    let securityViolationLogsCount = 0
+    if (securityViolations && securityViolations.length > 0) {
+      securityViolations.forEach(v => {
+        const violationData: Prisma.InputJsonObject = {
+          violationType: v.type,
+          message: v.message,
+          severity: v.severity,
+          timestamp: v.timestamp,
+          faceCount: v.faceCount || null,
+          duration: v.duration || null
+        }
+
+        logsData.push({
+          sessionId: sessionId,
+          detectionType: 'SECURITY_VIOLATION',
+          detectionData: violationData,
+          confidence: v.severity === 'CRITICAL' ? 0.99 : 0.85
+        })
+        securityViolationLogsCount++
+      })
+      console.log(`🚨 ตรวจพบ Security Violations: ${securityViolationLogsCount} รายการ`)
+    }
+
+    // 4. ทำการบันทึกข้อมูลอย่างถูกต้อง (ลบ log เก่าของ session เพื่อกันข้อมูลซ้ำจากการ auto-sync แล้วลง log ชุดใหม่ล่าสุด)
     let logsCreated = 0
     await prisma.$transaction(async (tx) => {
       await tx.trackingLog.deleteMany({
@@ -162,7 +198,10 @@ export async function POST(request: NextRequest) {
       
       // Face detection loss summary
       faceDetectionLoss: faceDetectionLoss?.lossCount || 0,
-      totalLossTime: faceDetectionLoss?.totalLossTime || 0
+      totalLossTime: faceDetectionLoss?.totalLossTime || 0,
+
+      // Security violations summary
+      securityViolationCount: securityViolationLogsCount
     }
 
     let sessionStatistics

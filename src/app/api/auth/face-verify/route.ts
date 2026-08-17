@@ -104,10 +104,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ตรวจสอบรูปแบบข้อมูลใบหน้า
-    if (!Array.isArray(faceData) || faceData.length !== 128) {
+    // ตรวจสอบรูปแบบข้อมูลใบหน้า (รองรับทั้ง 512D ArcFace และ 128D Legacy)
+    if (!Array.isArray(faceData) || (faceData.length !== 512 && faceData.length !== 128)) {
       return NextResponse.json(
-        { error: 'ข้อมูลใบหน้าไม่ถูกต้อง' },
+        { error: 'ข้อมูลใบหน้าไม่ถูกต้อง (ต้องเป็นขนาด 512D หรือ 128D)' },
         { status: 400 }
       )
     }
@@ -135,46 +135,72 @@ export async function POST(request: NextRequest) {
     // เปรียบเทียบข้อมูลลักษณะใบหน้า
     let storedFaceData: Record<string, number[]> | number[]
     
-    // แยกข้อมูล JSON ถ้าบันทึกเป็นสตริง
     if (typeof user.faceData === 'string') {
       storedFaceData = JSON.parse(user.faceData)
     } else {
       storedFaceData = user.faceData
     }
-    
-    const distances: { pose: string, distance: number }[] = []
+
+    const is512D = faceData.length === 512
+    const distances: { pose: string, distance: number, similarity?: number }[] = []
     let minDistance = Infinity
+    let maxSimilarity = 0
     let bestMatch = ''
-    
-    // ตรวจสอบว่าข้อมูลที่บันทึกเป็นหลายท่า (object) หรือท่าเดียว (array)
+
+    const calculateCosineSimilarity = (v1: number[], v2: number[]) => {
+      let dot = 0, n1 = 0, n2 = 0
+      for (let i = 0; i < v1.length; i++) {
+        dot += v1[i] * v2[i]
+        n1 += v1[i] * v1[i]
+        n2 += v2[i] * v2[i]
+      }
+      return dot / ((Math.sqrt(n1) * Math.sqrt(n2)) || 1)
+    }
+
     if (Array.isArray(storedFaceData)) {
-      // ข้อมูลท่าเดียวรุ่นเก่า
-      const distance = euclideanDistance(faceData, storedFaceData)
-      distances.push({ pose: 'legacy', distance })
-      minDistance = distance
-      bestMatch = 'legacy'
+      if (is512D && storedFaceData.length === 512) {
+        const sim = calculateCosineSimilarity(faceData, storedFaceData)
+        distances.push({ pose: 'legacy_512', distance: 1 - sim, similarity: sim })
+        maxSimilarity = sim
+        bestMatch = 'legacy_512'
+      } else {
+        const distance = euclideanDistance(faceData, storedFaceData)
+        distances.push({ pose: 'legacy', distance })
+        minDistance = distance
+        bestMatch = 'legacy'
+      }
     } else {
-      // ข้อมูลหลายท่า - เปรียบเทียบกับทุกท่าที่บันทึกไว้
       const poses = Object.keys(storedFaceData)
-      
       for (const pose of poses) {
-        if (Array.isArray((storedFaceData as Record<string, number[]>)[pose]) && (storedFaceData as Record<string, number[]>)[pose].length === 128) {
-          const distance = euclideanDistance(faceData, (storedFaceData as Record<string, number[]>)[pose])
-          distances.push({ pose, distance })
-          
-          if (distance < minDistance) {
-            minDistance = distance
-            bestMatch = pose
+        const storedVec = (storedFaceData as Record<string, number[]>)[pose]
+        if (Array.isArray(storedVec)) {
+          if (is512D && storedVec.length === 512) {
+            const sim = calculateCosineSimilarity(faceData, storedVec)
+            distances.push({ pose, distance: 1 - sim, similarity: sim })
+            if (sim > maxSimilarity) {
+              maxSimilarity = sim
+              bestMatch = pose
+            }
+          } else if (storedVec.length === 128) {
+            const distance = euclideanDistance(faceData, storedVec)
+            distances.push({ pose, distance })
+            if (distance < minDistance) {
+              minDistance = distance
+              bestMatch = pose
+            }
           }
         }
       }
     }
-    
-    // เกณฑ์การจับคู่ใบหน้า (0.50 สำหรับ webcam/background check เพื่อป้องกัน false rejection, 0.45 สำหรับ multi-pose)
-    const threshold = singlePoseVerification ? 0.50 : 0.45
-    
-    // เพิ่มการตรวจสอบเพิ่มเติม - ต้องมีการตรงกับหลายท่า
-    const validMatches = distances.filter(d => d.distance < threshold)
+
+    // เกณฑ์การจับคู่ใบหน้า: 512D ArcFace Cosine Similarity >= 0.65 vs 128D Euclidean Distance < 0.50
+    const arcFaceThreshold = 0.65
+    const legacyThreshold = singlePoseVerification ? 0.50 : 0.45
+    const threshold = is512D ? arcFaceThreshold : legacyThreshold
+
+    const validMatches = is512D
+      ? distances.filter(d => (d.similarity || 0) >= arcFaceThreshold)
+      : distances.filter(d => d.distance < legacyThreshold)
     
     // ตรวจสอบการยืนยันท่า (ถ้ามีข้อมูล verifiedPoses)
     let poseVerificationPassed = true
@@ -193,7 +219,9 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    const isMatch = minDistance < threshold && validMatches.length > 0 && poseVerificationPassed
+    const isMatch = is512D
+      ? (maxSimilarity >= arcFaceThreshold && validMatches.length > 0 && poseVerificationPassed)
+      : (minDistance < threshold && validMatches.length > 0 && poseVerificationPassed)
 
     let resetToken: string | undefined = undefined
     if (isMatch && forPasswordReset) {

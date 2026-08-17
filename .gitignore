@@ -41,3 +41,8 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# documentation files to ignore
+Face_Detection_Tools_Comparison.md
+PROJECT_SUMMARY.md
+

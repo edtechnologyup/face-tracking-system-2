@@ -1,9 +1,11 @@
 'use client'
-import { FaceTrackingData } from '@/lib/mediapipe-detector'
+import { FaceTrackingData, OrientationStats } from '@/lib/mediapipe-detector'
 
 interface DetectionStatsProps {
   data: FaceTrackingData | null
   isActive: boolean
+  orientationStats?: OrientationStats | null
+  faceLossStats?: { lossCount: number; totalLossTime: number } | null
 }
 
 export function DetectionStats({ data, isActive }: DetectionStatsProps) {
@@ -85,12 +87,24 @@ export function DetectionStats({ data, isActive }: DetectionStatsProps) {
         </span>
       </div>
 
+
+
       {/* Grid รายละเอียดตัวเลขการตรวจจับ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-        <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="text-xs text-gray-500">การตรวจจับใบหน้า</div>
-          <div className={`font-semibold mt-1 ${data.isDetected ? 'text-green-600' : 'text-red-600'}`}>
-            {data.isDetected ? '✓ ตรวจพบใบหน้า' : '✗ ไม่พบใบหน้า'}
+        <div className={`p-3 rounded-lg border flex flex-col justify-center ${
+          data.multipleFaces?.isSecurityRisk 
+            ? 'bg-red-50 border-red-300 text-red-900' 
+            : data.isDetected ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-red-50 border-red-200 text-red-900'
+        }`}>
+          <div className="text-xs text-gray-500 font-medium">จำนวนใบหน้าที่ตรวจพบ</div>
+          <div className="text-base font-extrabold mt-0.5 flex items-center gap-1.5">
+            <span>👤</span>
+            <span>{data.multipleFaces?.count || (data.isDetected ? 1 : 0)} คน</span>
+            {data.multipleFaces?.isSecurityRisk && (
+              <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold ml-1 animate-pulse">
+                เสี่ยงทุจริต!
+              </span>
+            )}
           </div>
         </div>
 
@@ -119,10 +133,12 @@ export function DetectionStats({ data, isActive }: DetectionStatsProps) {
       {/* Distance & Multiple Faces status */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
         <div className={`p-2.5 rounded-lg border text-xs flex justify-between items-center ${
-          data.multipleFaces?.isSecurityRisk ? 'bg-red-50 text-red-800 border-red-200' : 'bg-gray-50 text-gray-700 border-gray-200'
+          data.multipleFaces?.isSecurityRisk ? 'bg-red-50 text-red-800 border-red-200' : 'bg-blue-50 text-blue-800 border-blue-200'
         }`}>
-          <span>จำนวนใบหน้าในกล้อง:</span>
-          <span className="font-bold">{data.multipleFaces?.count || (data.isDetected ? 1 : 0)} คน</span>
+          <span>สถานะจำนวนใบหน้าในกล้อง:</span>
+          <span className="font-bold">
+            {data.multipleFaces?.isSecurityRisk ? `🚨 พบ ${data.multipleFaces.count} ใบหน้า (เสี่ยงทุจริต)` : `🟢 ปกติ (${data.isDetected ? 1 : 0} ใบหน้า)`}
+          </span>
         </div>
 
         <div className={`p-2.5 rounded-lg border text-xs flex justify-between items-center ${

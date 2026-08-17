@@ -77,6 +77,7 @@ interface DashboardStats {
   totalAdmins: number
   totalSessions: number
   activeSessions: number
+  totalSecurityViolations?: number
   chartData?: BehaviorData[]
 }
 
@@ -269,6 +270,7 @@ export default function AdminDashboard() {
             totalAdmins={stats.totalAdmins}
             totalSessions={stats.totalSessions}
             activeSessions={stats.activeSessions}
+            totalSecurityViolations={stats.totalSecurityViolations}
             chartData={stats.chartData}
           />
         )}

@@ -18,6 +18,12 @@ interface TrackingSession {
     studentId?: string | null
     section?: string | null
   }
+  statistics?: {
+    securityViolationCount?: number
+  } | null
+  _count?: {
+    trackingLogs?: number
+  }
 }
 
 interface SessionsListProps {
@@ -99,8 +105,11 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
   return (
     <div className="space-y-6">
       <Card className="p-0 overflow-hidden shadow-sm border border-purple-100">
-        <div className="p-6 border-b border-purple-100 bg-purple-50/20">
-          <h2 className="text-xl font-bold text-gray-900">รายการเซสชันการติดตามใบหน้า</h2>
+        <div className="p-6 border-b border-purple-100 bg-purple-50/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">รายการเซสชันการติดตามใบหน้าและการสอบ</h2>
+            <p className="text-xs text-purple-600 mt-1">แสดงรายการเซสชันการสอบทั้งหมด</p>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -123,40 +132,41 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
                   </td>
                 </tr>
               ) : (
-                sessions.map((session) => (
-                  <tr key={session.id} className="hover:bg-purple-50/20 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        session.user.section === 'Sec 1' ? 'bg-purple-100 text-purple-800' :
-                        session.user.section === 'Sec 2' ? 'bg-indigo-100 text-indigo-800' :
-                        'bg-gray-100 text-gray-500'
-                      }`}>
-                        {session.user.section || 'ไม่มีกลุ่มเรียน'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <span className="font-medium text-gray-900">{session.user.firstName} {session.user.lastName}</span>
-                      <br />
-                      <span className="text-xs text-gray-400">{session.user.email}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(session.startTime)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {session.endTime ? formatDate(session.endTime) : (session.status === 'INTERRUPTED' ? 'หยุดกลางคัน' : 'กำลังดำเนินการ')}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDuration(session.totalDuration)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        session.status === 'DISCONNECTED' || session.status === 'INTERRUPTED' ? 'bg-red-100 text-red-800 border border-red-200' :
-                        session.endTime ? 'bg-gray-100 text-gray-800' : 
-                        'bg-green-100 text-green-800 animate-pulse'
-                      }`}>
-                        {session.status === 'DISCONNECTED' ? 'ขาดการเชื่อมต่อระหว่างตรวจจับ' :
-                         session.status === 'INTERRUPTED' ? 'หยุดการบันทึกกลางคัน' :
-                         session.endTime ? 'เสร็จสิ้น' : 'กำลังดำเนินการ'}
-                      </span>
-                    </td>
+                sessions.map((session) => {
+                  return (
+                    <tr key={session.id} className="hover:bg-purple-50/20 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          session.user.section === 'Sec 1' ? 'bg-purple-100 text-purple-800' :
+                          session.user.section === 'Sec 2' ? 'bg-indigo-100 text-indigo-800' :
+                          'bg-gray-100 text-gray-500'
+                        }`}>
+                          {session.user.section || 'ไม่มีกลุ่มเรียน'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <span className="font-medium text-gray-900">{session.user.firstName} {session.user.lastName}</span>
+                        <br />
+                        <span className="text-xs text-gray-400">{session.user.email}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(session.startTime)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {session.endTime ? formatDate(session.endTime) : (session.status === 'INTERRUPTED' ? 'หยุดกลางคัน' : 'กำลังดำเนินการ')}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {formatDuration(session.totalDuration)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          session.status === 'DISCONNECTED' || session.status === 'INTERRUPTED' ? 'bg-red-100 text-red-800 border border-red-200' :
+                          session.endTime ? 'bg-gray-100 text-gray-800' : 
+                          'bg-green-100 text-green-800 animate-pulse'
+                        }`}>
+                          {session.status === 'DISCONNECTED' ? 'ขาดการเชื่อมต่อ' :
+                           session.status === 'INTERRUPTED' ? 'หยุดการบันทึกกลางคัน' :
+                           session.endTime ? 'เสร็จสิ้น' : 'กำลังดำเนินการ'}
+                        </span>
+                      </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex justify-end gap-2">
                         <button
@@ -177,7 +187,8 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
                       </div>
                     </td>
                   </tr>
-                ))
+                )
+              })
               )}
             </tbody>
           </table>

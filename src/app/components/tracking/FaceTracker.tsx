@@ -1,19 +1,32 @@
 'use client'
 import { useRef, useEffect, useCallback, useState } from 'react'
-import { FaceTrackingData } from '@/lib/mediapipe-detector'
 import { Card } from '@/app/components/ui/Card'
 import { VideoPlayer } from './VideoPlayer'
 import { OverlayCanvas } from './OverlayCanvas'
 import { DetectionStats } from './DetectionStats'
 import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
-import { useFaceDetection } from '@/hooks/useFaceDetection'
+import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
 import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
 import toast from 'react-hot-toast'
 
 interface FaceTrackerProps {
   onTrackingStop: () => void
   sessionName?: string
+}
+
+interface AnalyticsResult {
+  liveness?: {
+    isReal: boolean
+    score: number
+    label: 'REAL' | 'SPOOF'
+  }
+  l2csGaze?: {
+    pitch: number
+    yaw: number
+    gazeDirection: 'LOOKING_LEFT' | 'LOOKING_RIGHT' | 'LOOKING_DOWN_NOTES' | 'LOOKING_UP' | 'SCREEN_CENTER'
+    isLookingOffScreen: boolean
+  }
 }
 
 export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ' }: FaceTrackerProps) {
@@ -26,50 +39,140 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [analyticsResult, setAnalyticsResult] = useState<AnalyticsResult | null>(null)
 
-  // ใช้ custom hooks
+  // ใช้ Hybrid custom hooks
   const { initializeCamera, stopCamera } = useCamera()
   const { 
     isActive, 
-    currentData, 
+    mediaPipeData,
+    yoloMultiFaceData,
+    violations,
     isRecording, 
     orientationStats, 
-    initializeDetector, 
-    startDetection, 
-    stopDetection,
+    faceLossStats,
+    initializeHybridDetectors, 
+    startHybridTracking, 
+    stopHybridTracking,
     startRecording,
     stopRecording,
     getCurrentStats,
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
     getOrientationHistory
-  } = useFaceDetection()
+  } = useHybridFaceDetection({
+    primaryIntervalMs: 100,
+    yoloIntervalMs: 1200,
+    lookingAwayThresholdMs: 3000
+  })
+
+  // Ref สำหรับเก็บ violations ล่าสุดเพื่อไม่ให้ callback re-trigger
+  const violationsRef = useRef(violations)
+  useEffect(() => {
+    violationsRef.current = violations
+  }, [violations])
 
 
 
 
-  // วาดการแสดงผลบน canvas
-  const drawDetectionOverlay = useCallback((data: FaceTrackingData) => {
+  // 🎨 วาดการแสดงผล Sci-Fi Mesh & YOLO Bounding Boxes บน Canvas
+  useEffect(() => {
     const canvas = canvasRef.current
     const video = videoRef.current
-    
     if (!canvas || !video) return
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // ล้าง canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    if (!data.isDetected) {
-      return
+    // 1. Draw MediaPipe 468-point Mesh for candidate face
+    if (mediaPipeData && mediaPipeData.isDetected && mediaPipeData.landmarks) {
+      drawSciFiFaceMesh(ctx, mediaPipeData.landmarks, video, canvas.width, canvas.height, mediaPipeData.orientation.isLookingAway)
     }
 
-    // วาด Sci-Fi Face Mesh ด้วย landmarks ทั้ง 468 จุด เท่านั้น (ไม่มีการเขียนข้อความทับกล้อง)
-    if (data.landmarks && data.landmarks.length > 0) {
-      drawSciFiFaceMesh(ctx, data.landmarks, video, canvas.width, canvas.height, data.orientation.isLookingAway)
+    // 2. Draw YOLOv8 Intruder Bounding Boxes
+    if (yoloMultiFaceData && yoloMultiFaceData.boxes) {
+      yoloMultiFaceData.boxes.forEach((box) => {
+        if (!box.isPrimary) {
+          const vx = (box.x / 100) * canvas.width
+          const vy = (box.y / 100) * canvas.height
+          const vw = (box.width / 100) * canvas.width
+          const vh = (box.height / 100) * canvas.height
+
+          ctx.strokeStyle = '#EF4444'
+          ctx.lineWidth = 3
+          ctx.strokeRect(vx, vy, vw, vh)
+
+          ctx.fillStyle = '#EF4444'
+          ctx.font = 'bold 12px sans-serif'
+          ctx.fillText(`🚨 INTRUDER (${(box.confidence * 100).toFixed(0)}%)`, vx, vy > 15 ? vy - 5 : vy + 15)
+        }
+      })
     }
-  }, [])
+  }, [mediaPipeData, yoloMultiFaceData])
+
+  // 🚀 ส่งภาพ Snapshot เพื่อวิเคราะห์ Phase 3 Deep Analytics (L2CS-Net + MiniFASNet) ไปยัง API
+  const sendSnapshotForDeepAnalytics = useCallback(async () => {
+    const video = videoRef.current
+    if (!video || video.readyState < 2) return
+
+    try {
+      const offscreenCanvas = document.createElement('canvas')
+      offscreenCanvas.width = 320
+      offscreenCanvas.height = 240
+      const ctx = offscreenCanvas.getContext('2d')
+      if (!ctx) return
+
+      ctx.drawImage(video, 0, 0, 320, 240)
+      const base64Image = offscreenCanvas.toDataURL('image/jpeg', 0.8)
+
+      const token = localStorage.getItem('token')
+      const landmarks = mediaPipeData?.landmarks ? mediaPipeData.landmarks.map(l => ({ x: l.x, y: l.y, z: l.z })) : undefined
+
+      const response = await fetch('/api/tracking/snapshot-analytics', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          image: base64Image,
+          landmarks: landmarks
+        })
+      })
+
+      const resData = await response.json()
+      if (response.ok && resData.success && resData.data) {
+        setAnalyticsResult({
+          liveness: resData.data.liveness,
+          l2csGaze: resData.data.l2csGaze
+        })
+      }
+    } catch (err) {
+      console.warn('Backend snapshot analytics warning:', err)
+    }
+  }, [mediaPipeData])
+
+  // Periodic Snapshot Trigger (ทุกๆ 8 วินาทีระหว่างการติดตาม)
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null
+    if (isActive) {
+      const timeout = setTimeout(() => {
+        sendSnapshotForDeepAnalytics()
+      }, 2000)
+
+      interval = setInterval(() => {
+        sendSnapshotForDeepAnalytics()
+      }, 8000)
+
+      return () => {
+        clearTimeout(timeout)
+        if (interval) clearInterval(interval)
+      }
+    }
+  }, [isActive, sendSnapshotForDeepAnalytics])
 
   // ตัวแปรป้องกันการสร้าง session พร้อมกัน
   const sessionCreationInProgress = useRef(false)
@@ -77,25 +180,19 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   // ฟังก์ชันสร้าง tracking session
   const createTrackingSession = useCallback(async () => {
     try {
-      // ป้องกันการสร้าง session ซ้ำแบบเข้มงวด
       if (sessionIdRef.current) {
-        console.log('📌 Session มีอยู่แล้ว:', sessionIdRef.current)
         return sessionIdRef.current
       }
 
-      // ป้องกันการเรียกพร้อมกัน (race condition)
       if (sessionCreationInProgress.current) {
-        console.log('⏳ กำลังสร้าง session อยู่ รอสักครู่...')
         return null
       }
 
       sessionCreationInProgress.current = true
-
       setIsLoading(true)
       setApiError(null)
 
       const token = localStorage.getItem('token')
-      console.log('🔑 Token check:', token ? 'มี token' : 'ไม่มี token')
       if (!token) {
         throw new Error('ไม่พบ token การเข้าสู่ระบบ กรุณา Login ก่อน')
       }
@@ -169,21 +266,16 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
   }, [])
 
-  // เริ่มการติดตาม และบันทึกข้อมูลอัตโนมัติ
+  // เริ่มการติดตามด้วย Hybrid Dual-Loop Architecture
   const startTracking = useCallback(async () => {
     try {
-      // ตรวจสอบว่ามี session อยู่แล้วหรือไม่
       let sessionId = sessionIdRef.current
       if (!sessionId) {
-        // สร้าง tracking session ใหม่เฉพาะเมื่อยังไม่มี
         sessionId = await createTrackingSession()
         if (!sessionId) {
           alert('ไม่สามารถสร้าง tracking session ได้\nกรุณาตรวจสอบการเข้าสู่ระบบ')
           return
         }
-        console.log('✅ สร้าง session ใหม่:', sessionId)
-      } else {
-        console.log('📌 ใช้ session ที่มีอยู่:', sessionId)
       }
 
       const cameraInitialized = await initializeCamera(videoRef)
@@ -192,24 +284,22 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         return
       }
 
-      await initializeDetector()
+      const ok = await initializeHybridDetectors()
+      if (!ok) {
+        alert('ไม่สามารถเริ่มต้น AI Hybrid Detectors ได้')
+        return
+      }
+
+      startHybridTracking(videoRef)
       
-      startDetection(videoRef, drawDetectionOverlay)
-      
-      // Real-time callbacks removed
-      
-      // เริ่มบันทึกข้อมูลอัตโนมัติ
       setTimeout(() => {
-        const started = startRecording()
-        if (started) {
-          console.log('🎬 เริ่มบันทึก orientation data อัตโนมัติ สำหรับ session:', sessionId)
-        }
-      }, 1000) // รอ 1 วินาทีให้ detection เริ่มทำงาน
+        startRecording()
+      }, 1000)
     } catch (error) {
       console.error('❌ เกิดข้อผิดพลาดในการเริ่มต้น:', error)
-      alert('MediaPipe ไม่สามารถโหลดได้\nกรุณาตรวจสอบ internet connection\nหรือลอง refresh หน้าเว็บ')
+      alert('สถาปัตยกรรม Hybrid ไม่สามารถเริ่มต้นได้\nกรุณาลองใหม่อีกครั้ง')
     }
-  }, [initializeCamera, initializeDetector, startDetection, drawDetectionOverlay, startRecording, createTrackingSession])
+  }, [createTrackingSession, initializeCamera, initializeHybridDetectors, startHybridTracking, startRecording])
 
   // ฟังก์ชันส่งข้อมูลไป API
   const saveOrientationData = useCallback(async (
@@ -260,7 +350,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           events: orientationEvents,
           sessionStats: stats as Record<string, unknown>,
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
-          faceDetectionLossEvents: faceDetectionLossEvents || []
+          faceDetectionLossEvents: faceDetectionLossEvents || [],
+          securityViolations: violationsRef.current || []
         }),
         keepalive: isKeepAlive
       })
@@ -356,13 +447,13 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       await endTrackingSession(currentSessionId, 'INTERRUPTED')
     }
     
-    stopDetection()
+    stopHybridTracking()
     stopCamera(videoRef)
     // ล้าง session reference และ flags เมื่อหยุดการติดตาม
     sessionIdRef.current = null
     sessionCreationInProgress.current = false
     onTrackingStop()
-  }, [stopDetection, stopCamera, onTrackingStop, isRecording, handleStopRecording, currentSessionId, endTrackingSession])
+  }, [stopHybridTracking, stopCamera, onTrackingStop, isRecording, handleStopRecording, currentSessionId, endTrackingSession])
 
   // ฟังก์ชันส่วนกลางสำหรับบันทึกและซิงค์ข้อมูล session ปัจจุบันแบบฉุกเฉินหรือกรณีขาดการเชื่อมต่อ
   const flushSessionData = useCallback((sessionStatus: string = 'DISCONNECTED', isKeepAlive = true) => {
@@ -421,14 +512,15 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
             sessionStartTime: new Date().toISOString()
           },
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
-          faceDetectionLossEvents: faceDetectionLossEvents || []
+          faceDetectionLossEvents: faceDetectionLossEvents || [],
+          securityViolations: violationsRef.current || []
         }),
         keepalive: isKeepAlive
       }).catch(err => console.error('Auto-sync orientation error:', err))
 
       // 2. อัปเดตสถานะ session
       fetch('/api/tracking/sessions', {
-        method: 'PUT',
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
@@ -516,14 +608,122 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   return (
     <Card className="w-full h-full">
       <div className="p-6">
-        {/* Video and Canvas Container */}
-        <div className="relative mb-6">
+        {/* Video and Canvas Container with Live Face Count HUD Badge */}
+        <div className="relative mb-6 rounded-2xl overflow-hidden shadow-lg border border-gray-200">
           <VideoPlayer ref={videoRef} />
           <OverlayCanvas ref={canvasRef} videoRef={videoRef} />
+
+          {/* Live Detected Face Count Badge on Video Corner */}
+          {isActive && (
+            <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+              {mediaPipeData?.multipleFaces?.isSecurityRisk || (yoloMultiFaceData && yoloMultiFaceData.faceCount > 1) ? (
+                <div className="bg-red-600/90 text-white border border-red-400 backdrop-blur-md flex items-center gap-2 px-3.5 py-1.5 rounded-full shadow-lg text-xs font-bold font-mono animate-bounce">
+                  <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
+                  <span>🚨 ตรวจพบ: {yoloMultiFaceData?.faceCount || mediaPipeData?.multipleFaces?.count || 2} ใบหน้า (เสี่ยงทุจริต!)</span>
+                </div>
+              ) : mediaPipeData?.isDetected ? (
+                <div className="bg-slate-900/80 text-emerald-400 border border-emerald-500/40 backdrop-blur-md flex items-center gap-2 px-3.5 py-1.5 rounded-full shadow-lg text-xs font-bold font-mono">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>👤 ตรวจพบ: 1 ใบหน้า (ผู้สอบหลัก)</span>
+                </div>
+              ) : (
+                <div className="bg-slate-900/80 text-rose-400 border border-rose-500/40 backdrop-blur-md flex items-center gap-2 px-3.5 py-1.5 rounded-full shadow-lg text-xs font-bold font-mono">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+                  <span>❌ ไม่พบใบหน้าในกล้อง</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Current Detection Status */}
-        <DetectionStats data={currentData} isActive={isActive} />
+        {/* Current Primary Detection Status & Live Behavior Event Counters */}
+        <DetectionStats 
+          data={mediaPipeData} 
+          isActive={isActive} 
+          orientationStats={orientationStats}
+          faceLossStats={faceLossStats}
+        />
+
+        {/* Phase 3 Backend Analytics Status (MiniFASNet Liveness + L2CS-Net 3D Gaze) */}
+        {isActive && analyticsResult && (
+          <div className="mb-4 p-4 bg-slate-900 text-white rounded-xl border border-slate-800 shadow-md">
+            <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-purple-400">
+                <span>🧠 Backend Hybrid AI Deep Analytics (Phase 3)</span>
+              </h3>
+              <span className="text-[10px] bg-purple-900/60 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30">
+                LIVE SNAPSHOT
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              {/* MiniFASNet Anti-Spoofing Status */}
+              <div className={`p-3 rounded-lg border flex items-center justify-between ${
+                analyticsResult.liveness?.isReal 
+                  ? 'bg-emerald-950/40 border-emerald-800/50 text-emerald-300'
+                  : 'bg-rose-950/40 border-rose-800/50 text-rose-300'
+              }`}>
+                <div>
+                  <div className="font-bold flex items-center gap-1.5">
+                    <span>🛡️ MiniFASNet Liveness:</span>
+                    <span>{analyticsResult.liveness?.label === 'REAL' ? '🟢 REAL (คนจริง)' : '🚨 SPOOF (ภาพปลอม)'}</span>
+                  </div>
+                  <div className="text-[11px] opacity-80 mt-0.5">
+                    คะแนนความสมจริง: {((analyticsResult.liveness?.score || 0) * 100).toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+
+              {/* L2CS-Net 3D Gaze Direction */}
+              <div className={`p-3 rounded-lg border flex items-center justify-between ${
+                analyticsResult.l2csGaze?.isLookingOffScreen
+                  ? 'bg-amber-950/40 border-amber-800/50 text-amber-300'
+                  : 'bg-indigo-950/40 border-indigo-800/50 text-indigo-300'
+              }`}>
+                <div>
+                  <div className="font-bold flex items-center gap-1.5">
+                    <span>👁️ L2CS-Net 3D Gaze:</span>
+                    <span>{analyticsResult.l2csGaze?.gazeDirection}</span>
+                  </div>
+                  <div className="text-[11px] opacity-80 mt-0.5">
+                    Pitch: {analyticsResult.l2csGaze?.pitch}° | Yaw: {analyticsResult.l2csGaze?.yaw}°
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Phase 1 YOLOv8 Intruder Alert Security Panel */}
+        {isActive && yoloMultiFaceData?.hasMultipleFaces && (
+          <div className="mb-4 p-4 bg-red-900/20 border-2 border-red-500 rounded-xl text-red-200 animate-pulse">
+            <div className="flex items-center gap-2 font-bold text-red-400">
+              <span className="text-xl">🚨</span>
+              <span>[YOLOv8 Background Scanner] ตรวจพบบุคคลซ้อนในกล้อง ({yoloMultiFaceData.faceCount} คน)!</span>
+            </div>
+            <p className="text-xs text-red-300 mt-1">
+              ระบบตรวจจับผู้บุกรุก (Intruder Detection) กำลังทำงานในโหมด Background Scan เพื่อความปลอดภัยสูงสุด
+            </p>
+          </div>
+        )}
+
+        {/* Security Violations Log Stream */}
+        {isActive && violations.length > 0 && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-xs space-y-2">
+            <div className="font-bold text-red-800 flex items-center justify-between">
+              <span>🚨 บันทึกเหตุการณ์ผิดปกติทางการสอบ (Security Violations):</span>
+              <span className="bg-red-200 text-red-900 px-2 py-0.5 rounded-full">{violations.length} รายการ</span>
+            </div>
+            <div className="max-h-32 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+              {violations.slice(0, 10).map((v) => (
+                <div key={v.id} className="p-2 bg-white rounded border border-red-100 flex justify-between items-center text-[11px]">
+                  <span className="font-medium text-red-700">{v.message}</span>
+                  <span className="text-gray-400 text-[10px]">{new Date(v.timestamp).toLocaleTimeString('th-TH')}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* API Error Display */}
         {apiError && (

@@ -52,18 +52,20 @@ export async function GET(request: NextRequest) {
     // เคลียร์และปิดเซสชันที่ค้างเกิน 60 วินาทีให้อัตโนมัติก่อนประมวลผลสถิติ
     await autoCloseStaleSessions()
 
-    // ดึงข้อมูลสถิติพื้นฐาน (ใช้ count ซึ่งเป็น DB aggregation อยู่แล้ว)
-    const [totalUsers, totalAdmins, totalSessions, activeSessions, interruptedSessions] = await Promise.all([
+    // ดึงข้อมูลสถิติพื้นฐาน
+    const [totalUsers, totalAdmins, totalSessions, activeSessions, interruptedSessions, totalSecurityViolations] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { role: 'ADMIN' } }),
       prisma.trackingSession.count(),
       prisma.trackingSession.count({ where: { status: 'IN_PROGRESS' } }),
-      prisma.trackingSession.count({ where: { status: 'DISCONNECTED' } })
+      prisma.trackingSession.count({ where: { status: 'DISCONNECTED' } }),
+      prisma.trackingLog.count({ where: { detectionType: 'SECURITY_VIOLATION' } })
     ])
 
     // ใช้ raw SQL ที่อ้างอิงชื่อตารางถูกต้อง ("tracking_logs") เพื่อ aggregate ข้อมูลพฤติกรรมบน database
     let orientationAgg: Array<{ direction: string; count: number; total_time: number }> = []
     let faceLossAgg: Array<{ count: number; total_time: number }> = []
+    let violationAgg: Array<{ count: number }> = []
 
     try {
       orientationAgg = await prisma.$queryRaw<
@@ -104,6 +106,14 @@ export async function GET(request: NextRequest) {
         FROM "tracking_logs"
         WHERE "detectionType" = 'FACE_DETECTION_LOSS'
       `
+
+      violationAgg = await prisma.$queryRaw<
+        Array<{ count: number }>
+      >`
+        SELECT COUNT(*)::integer as count
+        FROM "tracking_logs"
+        WHERE "detectionType" = 'SECURITY_VIOLATION'
+      `
     } catch (sqlError) {
       console.error('SQL aggregation warning:', sqlError)
     }
@@ -114,7 +124,8 @@ export async function GET(request: NextRequest) {
       rightTurn: { count: 0, totalTime: 0 },
       lookDown: { count: 0, totalTime: 0 },
       lookUp: { count: 0, totalTime: 0 },
-      faceLoss: { count: 0, totalTime: 0 }
+      faceLoss: { count: 0, totalTime: 0 },
+      securityViolation: { count: Number(violationAgg[0]?.count || totalSecurityViolations || 0), totalTime: 0 }
     }
 
     for (const row of orientationAgg) {
@@ -186,6 +197,13 @@ export async function GET(request: NextRequest) {
         totalTime: Math.round(behaviorCounts.faceLoss.totalTime * 10) / 10,
         color: '#ef4444',
         lightColor: '#fca5a5'
+      },
+      {
+        behavior: 'เหตุการณ์ผิดปกติ (Violations)',
+        count: behaviorCounts.securityViolation.count,
+        totalTime: 0,
+        color: '#dc2626',
+        lightColor: '#fca5a5'
       }
     ]
 
@@ -195,6 +213,7 @@ export async function GET(request: NextRequest) {
       totalSessions,
       activeSessions,
       interruptedSessions,
+      totalSecurityViolations,
       chartData
     })
 

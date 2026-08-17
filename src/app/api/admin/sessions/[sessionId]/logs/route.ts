@@ -78,7 +78,30 @@ export async function GET(
     // คำนวณสถิติตาม DetectionType ที่มีจริง
     const faceOrientationLogs = logs.filter(log => log.detectionType === 'FACE_ORIENTATION')
     const faceDetectionLossLogs = logs.filter(log => log.detectionType === 'FACE_DETECTION_LOSS')
+    const securityViolationLogs = logs.filter(log => log.detectionType === 'SECURITY_VIOLATION')
     
+    // นับประเภท Security Violations
+    const violationCounts = {
+      MULTI_FACE_DETECTED: 0,
+      LOOKING_AWAY_EXCEEDED: 0,
+      FACE_LOSS: 0,
+      CRITICAL: 0,
+      WARNING: 0
+    }
+
+    securityViolationLogs.forEach(log => {
+      if (log.detectionData && typeof log.detectionData === 'object' && !Array.isArray(log.detectionData)) {
+        const data = log.detectionData as Record<string, unknown>
+        const vType = data.violationType as string
+        const severity = data.severity as string
+        if (vType === 'MULTI_FACE_DETECTED') violationCounts.MULTI_FACE_DETECTED++
+        if (vType === 'LOOKING_AWAY_EXCEEDED') violationCounts.LOOKING_AWAY_EXCEEDED++
+        if (vType === 'FACE_LOSS') violationCounts.FACE_LOSS++
+        if (severity === 'CRITICAL') violationCounts.CRITICAL++
+        if (severity === 'WARNING') violationCounts.WARNING++
+      }
+    })
+
     // นับทิศทางและเวลาจาก detectionData
     const directionCounts = {
       UP: 0,
@@ -116,6 +139,8 @@ export async function GET(
       totalLogs: logs.length,
       faceOrientationCount: faceOrientationLogs.length,
       faceDetectionLossCount: faceDetectionLossLogs.length,
+      securityViolationCount: securityViolationLogs.length,
+      violationCounts,
       directionCounts,
       directionDurations,
       totalBehaviorDuration,

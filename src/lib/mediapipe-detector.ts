@@ -53,6 +53,7 @@ export interface FaceTrackingData {
   confidence: number;
   realTime: string; // เวลาจริงในรูปแบบ HH:mm:ss
   landmarks?: NormalizedLandmark[];
+  allFaceLandmarks?: NormalizedLandmark[][];
   multipleFaces?: {
     count: number;
     isSecurityRisk: boolean;
@@ -99,16 +100,75 @@ export interface OrientationStats {
   lastEventTime?: string;
 }
 
+/**
+ * Adaptive One Euro Signal Filter (Casiez et al., CHI 2012)
+ * Eliminates jitter when stationary while providing near-zero lag during fast movement.
+ */
+export class OneEuroFilter {
+  private minCutoff: number;
+  private beta: number;
+  private dCutoff: number;
+  private xPrev: number | null = null;
+  private dxPrev: number = 0;
+  private lastTime: number | null = null;
+
+  constructor(minCutoff = 0.8, beta = 0.04, dCutoff = 1.0) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.dCutoff = dCutoff;
+  }
+
+  private alpha(cutoff: number, dt: number): number {
+    const tau = 1.0 / (2 * Math.PI * cutoff);
+    return 1.0 / (1.0 + tau / dt);
+  }
+
+  filter(value: number, timestamp = performance.now()): number {
+    if (this.lastTime === null || this.xPrev === null) {
+      this.xPrev = value;
+      this.dxPrev = 0;
+      this.lastTime = timestamp;
+      return value;
+    }
+
+    const dt = Math.max((timestamp - this.lastTime) / 1000, 0.001);
+    this.lastTime = timestamp;
+
+    const dx = (value - this.xPrev) / dt;
+    const edx = (this.alpha(this.dCutoff, dt) * dx) + ((1 - this.alpha(this.dCutoff, dt)) * this.dxPrev);
+    this.dxPrev = edx;
+
+    const cutoff = this.minCutoff + this.beta * Math.abs(edx);
+    const a = this.alpha(cutoff, dt);
+    const xFiltered = (a * value) + ((1 - a) * this.xPrev);
+    this.xPrev = xFiltered;
+
+    return xFiltered;
+  }
+
+  reset(): void {
+    this.xPrev = null;
+    this.dxPrev = 0;
+    this.lastTime = null;
+  }
+}
+
 export class MediaPipeDetector {
   private faceLandmarker: FaceLandmarker | null = null;
   private isInitialized: boolean = false;
   private lastDetection: FaceTrackingData | null = null;
   
-  // Auto-calibration system สำหรับ Pitch baseline
-  private calibrationSamples: number[] = [];
+  // Robust Outlier-Resistant Calibration System
+  private calibrationPitchSamples: number[] = [];
+  private calibrationYawSamples: number[] = [];
   private calibrationComplete: boolean = false;
-  private calibratedNeutralPosition: number = 0.58; // default value
+  private neutralPitchBaseline: number = 0;
+  private neutralYawBaseline: number = 0;
   
+  // Adaptive Signal Filters (One Euro Filters for Yaw & Pitch)
+  private yawFilter = new OneEuroFilter(0.8, 0.04);
+  private pitchFilter = new OneEuroFilter(0.8, 0.04);
+
   // Orientation tracking system
   private currentOrientationEvent: OrientationEvent | null = null;
   private orientationHistory: OrientationEvent[] = [];
@@ -130,9 +190,16 @@ export class MediaPipeDetector {
   private onFaceDetectionLoss?: (confidence: number) => void;
   private lastSentDirection: string = '';
   
-  // Thresholds for direction detection
-  private readonly YAW_THRESHOLD = 25;
-  private readonly PITCH_THRESHOLD = 15;
+  // Thresholds & Hysteresis Margins for direction detection
+  private readonly YAW_THRESHOLD = 15;
+  private readonly PITCH_UP_THRESHOLD = 14.0;
+  private readonly PITCH_DOWN_THRESHOLD = 12.0;
+  private readonly HYSTERESIS_MARGIN = 2.0; // รัศมีเผื่อ 2 องศาเพื่อป้องกันการตรวจจับสลับไปมาตรงขอบ
+
+  // Signal smoothing state
+  private smoothedYaw: number = 0;
+  private smoothedPitch: number = 0;
+  private currentDirection: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER' = 'CENTER';
 
   async initialize(): Promise<boolean> {
     try {
@@ -239,6 +306,32 @@ export class MediaPipeDetector {
         // บันทึก face detection loss
         this.handleFaceDetectionLoss();
         
+        // หากก่อนหน้านี้กำลังก้มหน้าอยู่ (DOWN) แล้วแลนด์มาร์คหลุดชั่วคราวจากการก้มลึก ให้คงสถานะ DOWN ไว้ช่วงสั้นๆ (กรอบ 1-10)
+        const isDeepBowingLoss = (this.currentDirection === 'DOWN' || this.smoothedPitch < -10.0) && this.consecutiveLossFrames <= 10;
+        
+        if (isDeepBowingLoss) {
+          console.log(`👇 Deep Head Pitch Bowing: ก้มหน้าลึกพ้นระยะตรวจจับชั่วคราว (เฟรมที่ ${this.consecutiveLossFrames}) - รักษาสถานะ DOWN`);
+          
+          const deepBowingData: FaceTrackingData = {
+            isDetected: true,
+            orientation: { 
+              yaw: this.smoothedYaw, 
+              pitch: Math.min(this.smoothedPitch, -20.0), 
+              isLookingAway: true, 
+              direction: 'DOWN' 
+            },
+            confidence: 0.75,
+            realTime: new Date().toLocaleTimeString('th-TH', { hour12: false }),
+            multipleFaces: {
+              count: 1,
+              isSecurityRisk: false
+            },
+          };
+          
+          this.lastDetection = deepBowingData;
+          return deepBowingData;
+        }
+
         // ส่งข้อมูล real-time face detection loss
         if (this.onFaceDetectionLoss) {
           this.onFaceDetectionLoss(0);
@@ -257,10 +350,36 @@ export class MediaPipeDetector {
         
         this.lastDetection = noFaceData;
         return noFaceData;
-        
       }
 
-      // ตรวจสอบจำนวนใบหน้าที่ตรวจพบ
+      // กรองใบหน้าซ้ำซ้อนที่เกิดจาก Motion Blur เมื่อผู้สอบขยับใบหน้าอย่างรวดเร็ว (Spatial NMS / Distance Filter)
+      const validFaceLandmarks: NormalizedLandmark[][] = [];
+      const validFaceCenters: { x: number; y: number; area: number; idx: number }[] = [];
+
+      for (let i = 0; i < results.faceLandmarks.length; i++) {
+        const faceLm = results.faceLandmarks[i];
+        const center = this.getFaceCenter(faceLm);
+        
+        let isMotionBlurGhost = false;
+        for (const existing of validFaceCenters) {
+          const dx = Math.abs(center.x - existing.x);
+          const dy = Math.abs(center.y - existing.y);
+          // หากจุดศูนย์กลางใบหน้า 2 ชุดอยู่ใกล้กันมาก (dx < 0.20 และ dy < 0.20) ถือเป็นภาพซ้อน motion blur ของคนเดียวกัน
+          if (dx < 0.20 && dy < 0.20) {
+            isMotionBlurGhost = true;
+            break;
+          }
+        }
+
+        if (!isMotionBlurGhost) {
+          validFaceCenters.push({ idx: validFaceLandmarks.length, ...center });
+          validFaceLandmarks.push(faceLm);
+        }
+      }
+
+      results.faceLandmarks = validFaceLandmarks;
+
+      // ตรวจสอบจำนวนใบหน้าที่ตรวจพบจริงหลังกรองภาพซ้อน
       const faceCount = results.faceLandmarks.length;
       const multipleFacesData = {
         count: faceCount,
@@ -327,7 +446,6 @@ export class MediaPipeDetector {
       }
 
       const landmarks = results.faceLandmarks[selectedFaceIdx];
-      console.log('✅ พบใบหน้าเป้าหมายหลัก! landmarks:', landmarks.length, 'จุด (Index:', selectedFaceIdx, ')');
       
       // บันทึกว่าพบใบหน้าแล้ว (reset loss tracking)
       this.handleFaceDetectionRecovered();
@@ -336,8 +454,7 @@ export class MediaPipeDetector {
       
       // เพิ่มข้อมูลหลายใบหน้า
       trackingData.multipleFaces = multipleFacesData;
-      
-      console.log('📈 tracking data:', trackingData);
+      trackingData.allFaceLandmarks = results.faceLandmarks;
       
       this.lastDetection = trackingData;
       return trackingData;
@@ -350,6 +467,20 @@ export class MediaPipeDetector {
 
   getLastDetection(): FaceTrackingData | null {
     return this.lastDetection;
+  }
+
+  /**
+   * Re-calibrate neutral baseline position (Outlier-resistant zeroing)
+   */
+  recalibrate(): void {
+    this.calibrationPitchSamples = [];
+    this.calibrationYawSamples = [];
+    this.calibrationComplete = false;
+    this.neutralPitchBaseline = 0;
+    this.neutralYawBaseline = 0;
+    this.yawFilter.reset();
+    this.pitchFilter.reset();
+    console.log('🔄 Re-calibrating face neutral baseline position...');
   }
 
   private analyzeLandmarks(landmarks: NormalizedLandmark[]): FaceTrackingData {
@@ -407,92 +538,127 @@ export class MediaPipeDetector {
     const chin = landmarks[18];           // คาง
     const forehead = landmarks[10];       // หน้าผาก
 
-    // Debug: แสดง coordinates ของจุดสำคัญ
-    console.log('🎯 Landmark Coordinates:', {
-      noseTip: { x: noseTip.x, y: noseTip.y },
-      leftEyeInner: { x: leftEyeInner.x, y: leftEyeInner.y },
-      rightEyeInner: { x: rightEyeInner.x, y: rightEyeInner.y },
-      leftEyeOuter: { x: leftEyeOuter.x, y: leftEyeOuter.y },
-      rightEyeOuter: { x: rightEyeOuter.x, y: rightEyeOuter.y },
-      chin: { x: chin.x, y: chin.y },
-      forehead: { x: forehead.x, y: forehead.y }
-    });
+    // คำนวณ yaw (หันซ้าย-ขวา) พร้อมระบบชดเชยการกลอกตาแบบสลับทิศทาง (Eye-Head Counter-Rotation Compensation)
+    const leftCheek = landmarks[234];     // โหนกแก้มซ้าย (บน unmirrored frame อยู่ฝั่งขวา X ≈ 0.80)
+    const rightCheek = landmarks[454];    // โหนกแก้มขวา (บน unmirrored frame อยู่ฝั่งซ้าย X ≈ 0.20)
+    const faceCenterX = (leftCheek.x + rightCheek.x) / 2;
 
-    // คำนวณ yaw (หันซ้าย-ขวา) ด้วยอัตราส่วนความยาวตา - **แก้ไขทิศทาง**
-    const leftEyeWidth = Math.abs(leftEyeOuter.x - leftEyeInner.x);
-    const rightEyeWidth = Math.abs(rightEyeOuter.x - rightEyeInner.x);
-    
-    // **แก้ไขทิศทาง**: เมื่อหันซ้าย ratio < 1, เมื่อหันขวา ratio > 1
-    // MediaPipe พิกัด: ตาซ้าย = มุมมองจากกล้อง (ด้านขวาของหน้าจอ), ตาขวา = ด้านซ้ายของหน้าจอ
-    const eyeRatio = leftEyeWidth / rightEyeWidth; // คืนกลับเป็นเดิม
-    let yaw = (1 - eyeRatio) * 100; // สลับเครื่องหมาย: (1 - ratio) แทน (ratio - 1)
-    yaw = Math.max(-60, Math.min(60, yaw)); // จำกัด range
+    // เมื่อผู้สอบหันไปทางซ้ายของตัวเอง จมูกจะเลื่อนไปทางขวาของกล้อง (noseTip.x > faceCenterX) -> (faceCenterX - noseTip.x) ได้ค่าลบ (< 0) -> yaw < -15° (LEFT)
+    // เมื่อผู้สอบหันไปทางขวาของตัวเอง จมูกจะเลื่อนไปทางซ้ายของกล้อง (noseTip.x < faceCenterX) -> (faceCenterX - noseTip.x) ได้ค่าบวก (> 0) -> yaw > +15° (RIGHT)
+    const headYawDegrees = (faceCenterX - noseTip.x) * 160;
+
+    const leftPupil = landmarks[468] || landmarks[470] || leftEyeOuter;
+    const rightPupil = landmarks[473] || landmarks[475] || rightEyeOuter;
+    const leftEyeWidth = Math.abs(leftEyeOuter.x - leftEyeInner.x) || 0.05;
+    const rightEyeWidth = Math.abs(rightEyeInner.x - rightEyeOuter.x) || 0.05;
+
+    const leftEyeCenterX = (leftEyeInner.x + leftEyeOuter.x) / 2;
+    const rightEyeCenterX = (rightEyeInner.x + rightEyeOuter.x) / 2;
+
+    const leftPupilOffset = (leftPupil.x - leftEyeCenterX) / leftEyeWidth;
+    const rightPupilOffset = (rightPupil.x - rightEyeCenterX) / rightEyeWidth;
+
+    const irisGazeRelX = (leftPupilOffset + rightPupilOffset) / 2;
+    const irisGazeDegrees = irisGazeRelX * 45;
+
+    // Net Gaze Yaw: เมื่อหันหน้าไปทางซ้าย/ขวา รวมความเอียงโครงหน้าและม่านตาให้ทิศทางสอดคล้องกัน
+    let yaw = headYawDegrees + irisGazeDegrees;
+    yaw = Math.max(-60, Math.min(60, yaw));
     
     // คำนวณ pitch (หันบน-ล่าง) ด้วยวิธีที่แม่นยำขึ้น
     const totalFaceHeight = Math.abs(chin.y - forehead.y);
     
     // ใช้ตำแหน่งสัมพัทธ์ของจมูกในใบหน้า (0-1 scale)
     const noseRelativePosition = (noseTip.y - forehead.y) / totalFaceHeight;
+    const pitchDeviation = 0.52 - noseRelativePosition; // Neutral nose position baseline ~0.52
     
-    // **แก้ไขการคำนวณ Pitch**: ใช้ baseline ที่แม่นยำขึ้น + Auto-calibration
-    // Auto-calibration: เก็บ samples แรก 30 ครั้ง (3 วินาที) เป็น baseline
-    if (!this.calibrationComplete && this.calibrationSamples.length < 30) {
-      this.calibrationSamples.push(noseRelativePosition);
-      console.log(`📊 Calibrating... Sample ${this.calibrationSamples.length}/30: ${noseRelativePosition.toFixed(4)}`);
+    // Eyelid pupil Y offset
+    const leftTop = landmarks[159] || leftPupil;
+    const leftBottom = landmarks[145] || leftPupil;
+    const rightTop = landmarks[386] || rightPupil;
+    const rightBottom = landmarks[374] || rightPupil;
+
+    const leftEyeHeight = Math.abs(leftBottom.y - leftTop.y) || 0.02;
+    const rightEyeHeight = Math.abs(rightBottom.y - rightTop.y) || 0.02;
+
+    const leftEyeCenterY = (leftTop.y + leftBottom.y) / 2;
+    const rightEyeCenterY = (rightTop.y + rightBottom.y) / 2;
+
+    const leftPupilOffsetY = (leftEyeCenterY - leftPupil.y) / leftEyeHeight;
+    const rightPupilOffsetY = (rightEyeCenterY - rightPupil.y) / rightEyeHeight;
+    const irisGazeRelY = (leftPupilOffsetY + rightPupilOffsetY) / 2;
+    const irisGazePitchDegrees = irisGazeRelY * 25;
+
+    // Raw Pitch ก่อนการ Calibrate (ปรับสมดุลความไว และชดเชย offset จาก +6.0 เหลือ +1.5°)
+    const pitchScale = pitchDeviation > 0 ? 80 : 75;
+    const rawPitch = (pitchDeviation * pitchScale) + irisGazePitchDegrees + 1.5; 
+
+    // Trimmed-Mean Auto-calibration: เก็บ 30 samples แรกและกรองข้อมูลสุดโต่ง 15% (Outlier Trimming)
+    if (!this.calibrationComplete) {
+      this.calibrationPitchSamples.push(rawPitch);
+      this.calibrationYawSamples.push(headYawDegrees);
       
-      if (this.calibrationSamples.length === 30) {
-        // คำนวณค่าเฉลี่ยเป็น neutral position ของผู้ใช้คนนี้
-        const sum = this.calibrationSamples.reduce((a, b) => a + b, 0);
-        this.calibratedNeutralPosition = sum / this.calibrationSamples.length;
+      if (this.calibrationPitchSamples.length >= 30) {
+        const sortedPitch = [...this.calibrationPitchSamples].sort((a, b) => a - b);
+        const sortedYaw = [...this.calibrationYawSamples].sort((a, b) => a - b);
+        const trimCount = Math.floor(sortedPitch.length * 0.15);
+        const validPitch = sortedPitch.slice(trimCount, sortedPitch.length - trimCount);
+        const validYaw = sortedYaw.slice(trimCount, sortedYaw.length - trimCount);
+
+        this.neutralPitchBaseline = validPitch.reduce((a, b) => a + b, 0) / validPitch.length;
+        this.neutralYawBaseline = validYaw.reduce((a, b) => a + b, 0) / validYaw.length;
         this.calibrationComplete = true;
-        console.log(`✅ Auto-calibration complete! Personal neutral position: ${this.calibratedNeutralPosition.toFixed(4)}`);
+        console.log(`✅ Robust Trimmed-Mean Calibration Complete! Personal Neutral Baseline -> Pitch: ${this.neutralPitchBaseline.toFixed(2)}°, Yaw: ${this.neutralYawBaseline.toFixed(2)}°`);
       }
     }
-    
-    // ใช้ calibrated baseline หรือ default value
-    const neutralNosePosition = this.calibratedNeutralPosition;
-    
-    // คำนวณส่วนเบี่ยงเบนจาก neutral position
-    const pitchDeviation = noseRelativePosition - neutralNosePosition;
-    
-    // แปลงเป็นองศาด้วย sensitivity สมดุล ป้องกันการติดตรวจจับจากเพียงการขยับศีรษะเล็กน้อยขณะอ่านข้อสอบ
-    let pitch = pitchDeviation * 90; 
-    pitch = Math.max(-30, Math.min(30, pitch)); // จำกัด range ±30°
 
-    // ตรวจสอบการหันออกจากจอ (เงยหน้าเมื่อ pitch <= -15, ก้มหน้าเมื่อ pitch >= PITCH_THRESHOLD)
-    const isLookingAway = Math.abs(yaw) > this.YAW_THRESHOLD || pitch <= -15 || pitch >= this.PITCH_THRESHOLD;
+    // ชดเชยการลดลงของสัดส่วน 2D เมื่อหันซ้าย-ขวา (3D Yaw-Pitch Decoupling) ป้องกันตรวจจับเป็นก้มหน้าขณะหันซ้าย/ขวา
+    const yawRad = (Math.abs(yaw) * Math.PI) / 180;
+    const pitchYawCompensation = (1 - Math.cos(yawRad)) * 14.0;
 
-    // Debug logging ที่ละเอียดยิ่งขึ้น
-    console.log(`🎯 Face Orientation Debug:`);
-    console.log(`   Calibration: ${this.calibrationComplete ? 'Complete' : `In progress (${this.calibrationSamples.length}/30)`}`);
-    console.log(`   Eye Widths - Left: ${leftEyeWidth.toFixed(4)}, Right: ${rightEyeWidth.toFixed(4)}`);
-    console.log(`   Eye Ratio: ${eyeRatio.toFixed(4)}`);
-    console.log(`   Face Height: ${totalFaceHeight.toFixed(4)}`);
-    console.log(`   Nose Position: ${noseRelativePosition.toFixed(4)} (neutral=${neutralNosePosition.toFixed(4)})`);
-    console.log(`   Pitch Deviation: ${pitchDeviation.toFixed(4)} -> ${pitch.toFixed(1)}° (should be ~0° when looking straight)`);
-    console.log(`   Final - Yaw: ${yaw.toFixed(1)}°, Pitch: ${pitch.toFixed(1)}°, Away: ${isLookingAway}`);
+    // คำนวณ Yaw/Pitch สัมพัทธ์กับตำแหน่ง neutral baseline เฉพาะตัวของผู้ใช้
+    const adjustedYaw = yaw - this.neutralYawBaseline;
+    let currentPitch = (rawPitch - this.neutralPitchBaseline) + pitchYawCompensation;
 
-    // กำหนดทิศทางการหันหน้า
-    const direction = this.getOrientationDirection(yaw, pitch);
-    
+    // ชดเชยการเงยหน้ามุมสูงมากๆ (Extreme Upward Pitch Detection Boost)
+    const eyeNoseDistanceY = noseTip.y - ((leftEyeCenterY + rightEyeCenterY) / 2);
+    if (totalFaceHeight < 0.15 && eyeNoseDistanceY < 0.028 && pitchDeviation > 0.06 && Math.abs(adjustedYaw) < 25) {
+      currentPitch = Math.max(currentPitch, 16.0);
+    }
+
+    currentPitch = Math.max(-35, Math.min(35, currentPitch));
+
+    // Adaptive One Euro Signal Filtering (กรองสัญญาณรบกวน ลด Delay และขจัด Jitter 100%)
+    const smoothYaw = Number(this.yawFilter.filter(adjustedYaw).toFixed(1));
+    const smoothPitch = Number(this.pitchFilter.filter(currentPitch).toFixed(1));
+    this.smoothedYaw = smoothYaw;
+    this.smoothedPitch = smoothPitch;
+
+    // กำหนดทิศทางการหันหน้าพร้อม Hysteresis
+    const direction = this.getOrientationDirection(smoothYaw, smoothPitch);
+    this.currentDirection = direction;
+
+    // ตรวจสอบการหันออกจากจอ
+    const isLookingAway = direction !== 'CENTER';
+
     // คำนวณความมั่นใจของเฟรมนี้แบบไดนามิกตามมุมหัน
     let frameConfidence = 0.98;
-    frameConfidence -= (Math.abs(yaw) / 90) * 0.25;
-    frameConfidence -= (Math.abs(pitch) / 90) * 0.15;
+    frameConfidence -= (Math.abs(smoothYaw) / 90) * 0.25;
+    frameConfidence -= (Math.abs(smoothPitch) / 90) * 0.15;
     const finalFrameConfidence = Math.max(0.50, Math.min(0.98, frameConfidence));
 
     // บันทึก orientation event หากกำลัง recording
     if (this.isRecording) {
-      this.recordOrientationEvent(direction, yaw, pitch, finalFrameConfidence);
+      this.recordOrientationEvent(direction, smoothYaw, smoothPitch, finalFrameConfidence);
     }
 
     // ส่งข้อมูล real-time หาก callback ถูกตั้งค่าไว้
     if (this.onOrientationChange && direction !== this.lastSentDirection) {
-      this.onOrientationChange(direction, yaw, pitch, Number(finalFrameConfidence.toFixed(3)));
+      this.onOrientationChange(direction, smoothYaw, smoothPitch, Number(finalFrameConfidence.toFixed(3)));
       this.lastSentDirection = direction;
     }
 
-    return { yaw, pitch, isLookingAway, direction };
+    return { yaw: smoothYaw, pitch: smoothPitch, isLookingAway, direction };
   }
 
   private calculateFaceDistance(landmarks: NormalizedLandmark[]) {
@@ -528,17 +694,6 @@ export class MediaPipeDetector {
     const DISTANCE_THRESHOLD_CM = 80;
     const isTooFar = estimatedCm > DISTANCE_THRESHOLD_CM;
     
-    // Debug logging
-    console.log(`📏 Distance Calculation:`, {
-      faceWidth: faceWidth.toFixed(4),
-      faceHeight: faceHeight.toFixed(4),
-      distanceFromWidth: distanceFromWidth.toFixed(1),
-      distanceFromHeight: distanceFromHeight.toFixed(1),
-      estimatedCm: estimatedCm.toFixed(1),
-      isTooFar,
-      threshold: DISTANCE_THRESHOLD_CM
-    });
-    
     return {
       estimatedCm: Math.round(estimatedCm),
       isTooFar,
@@ -550,20 +705,49 @@ export class MediaPipeDetector {
   // === Orientation Tracking Methods ===
   
   private getOrientationDirection(yaw: number, pitch: number): 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER' {
-    // ตรวจสอบ yaw ก่อน (หันซ้าย-ขวา)
-    if (Math.abs(yaw) > this.YAW_THRESHOLD) {
-      return yaw > 0 ? 'RIGHT' : 'LEFT';
-    }
-    
-    // ตรวจสอบ pitch (เงยหน้าเมื่อ pitch <= -15, ก้มหน้าเมื่อ pitch >= PITCH_THRESHOLD)
-    if (pitch <= -15) {
-      return 'UP';
+    const margin = this.HYSTERESIS_MARGIN;
+
+    // 1. Hysteresis Check: หากอยู่ในทิศทางเดิมอยู่แล้ว ให้คงสถานะไว้จนกว่าจะลดลงต่ำกว่าเกณฑ์
+    if (this.currentDirection === 'RIGHT') {
+      if (yaw > (this.YAW_THRESHOLD - margin) && Math.abs(yaw) >= Math.abs(pitch) - margin) return 'RIGHT';
+    } else if (this.currentDirection === 'LEFT') {
+      if (yaw < -(this.YAW_THRESHOLD - margin) && Math.abs(yaw) >= Math.abs(pitch) - margin) return 'LEFT';
+    } else if (this.currentDirection === 'UP') {
+      if (pitch > (this.PITCH_UP_THRESHOLD - margin) && pitch >= Math.abs(yaw) - margin) return 'UP';
+    } else if (this.currentDirection === 'DOWN') {
+      if (pitch < -(this.PITCH_DOWN_THRESHOLD - margin) && Math.abs(pitch) >= Math.abs(yaw) - margin) return 'DOWN';
     }
 
-    if (pitch >= this.PITCH_THRESHOLD) {
+    // 2. Dominant Axis Priority: เปรียบเทียบแกนหลักในการเคลื่อนที่เมื่อมีการเฉียง (เช่น หันซ้าย + เงยหน้านิดนึง)
+    const absYaw = Math.abs(yaw);
+    const absPitch = Math.abs(pitch);
+
+    const isYawActive = absYaw > this.YAW_THRESHOLD;
+    const isPitchUpActive = pitch > this.PITCH_UP_THRESHOLD;
+    const isPitchDownActive = pitch < -this.PITCH_DOWN_THRESHOLD;
+
+    // หากเกินเกณฑ์ทั้งสองแกนพร้อมกัน ให้ตัดตามแกนที่หันเอียงมากกว่า (Dominant Vector)
+    if (isYawActive && (isPitchUpActive || isPitchDownActive)) {
+      if (absYaw >= absPitch) {
+        return yaw > 0 ? 'RIGHT' : 'LEFT';
+      } else {
+        return pitch > 0 ? 'UP' : 'DOWN';
+      }
+    }
+
+    // หากเกินเกณฑ์เฉพาะ Yaw (หันซ้าย-ขวา)
+    if (isYawActive) {
+      return yaw > 0 ? 'RIGHT' : 'LEFT';
+    }
+
+    // หากเกินเกณฑ์เฉพาะ Pitch (ก้ม-เงย)
+    if (isPitchUpActive) {
+      return 'UP';
+    }
+    if (isPitchDownActive) {
       return 'DOWN';
     }
-    
+
     return 'CENTER';
   }
   
@@ -857,10 +1041,14 @@ export class MediaPipeDetector {
     this.isInitialized = false;
     this.lastDetection = null;
     
-    // Reset calibration
-    this.calibrationSamples = [];
+    // Reset calibration & filters
+    this.calibrationPitchSamples = [];
+    this.calibrationYawSamples = [];
     this.calibrationComplete = false;
-    this.calibratedNeutralPosition = 0.58;
+    this.neutralPitchBaseline = 0;
+    this.neutralYawBaseline = 0;
+    this.yawFilter.reset();
+    this.pitchFilter.reset();
     
     // Clear real-time callbacks
     this.clearRealtimeCallbacks();

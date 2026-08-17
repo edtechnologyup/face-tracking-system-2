@@ -16,17 +16,18 @@ interface DashboardStatsProps {
   totalAdmins: number
   totalSessions: number
   activeSessions: number
+  totalSecurityViolations?: number
   chartData?: BehaviorData[]
 }
 
-export function DashboardStats({ totalUsers, totalAdmins, totalSessions, activeSessions, chartData = [] }: DashboardStatsProps) {
+export function DashboardStats({ totalUsers, totalAdmins, totalSessions, activeSessions, totalSecurityViolations = 0, chartData = [] }: DashboardStatsProps) {
   console.log('DashboardStats chartData:', chartData)
   console.log('Chart data length:', chartData.length)
   
   return (
     <>
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <Card className="p-4">
           <div className="flex items-center">
             <div className="p-2 rounded-full bg-blue-100 mr-3">
@@ -35,7 +36,7 @@ export function DashboardStats({ totalUsers, totalAdmins, totalSessions, activeS
               </svg>
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">ผู้ใช้ทั้งหมด</p>
+              <p className="text-xs font-medium text-gray-600">ผู้ใช้ทั้งหมด</p>
               <p className="text-xl font-bold text-gray-900">{totalUsers}</p>
             </div>
           </div>
@@ -49,7 +50,7 @@ export function DashboardStats({ totalUsers, totalAdmins, totalSessions, activeS
               </svg>
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">ผู้ดูแลระบบ</p>
+              <p className="text-xs font-medium text-gray-600">ผู้ดูแลระบบ</p>
               <p className="text-xl font-bold text-gray-900">{totalAdmins}</p>
             </div>
           </div>
@@ -63,7 +64,7 @@ export function DashboardStats({ totalUsers, totalAdmins, totalSessions, activeS
               </svg>
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">เซสชันทั้งหมด</p>
+              <p className="text-xs font-medium text-gray-600">เซสชันทั้งหมด</p>
               <p className="text-xl font-bold text-gray-900">{totalSessions}</p>
             </div>
           </div>
@@ -79,8 +80,22 @@ export function DashboardStats({ totalUsers, totalAdmins, totalSessions, activeS
               </svg>
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">เซสชันกำลังดำเนินการ</p>
+              <p className="text-xs font-medium text-gray-600">เซสชันกำลังดำเนินการ</p>
               <p className="text-xl font-bold text-gray-900">{activeSessions}</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-4 border-l-4 border-l-red-500 bg-red-50/30">
+          <div className="flex items-center">
+            <div className="p-2 rounded-full bg-red-100 mr-3">
+              <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-red-700">เหตุการณ์ผิดปกติ (Violations)</p>
+              <p className="text-xl font-bold text-red-600">{totalSecurityViolations}</p>
             </div>
           </div>
         </Card>

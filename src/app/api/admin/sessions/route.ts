@@ -54,6 +54,16 @@ export async function GET(request: NextRequest) {
             studentId: true,
             section: true
           }
+        },
+        statistics: true,
+        _count: {
+          select: {
+            trackingLogs: {
+              where: {
+                detectionType: 'SECURITY_VIOLATION'
+              }
+            }
+          }
         }
       },
       orderBy: {

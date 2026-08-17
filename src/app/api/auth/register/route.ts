@@ -174,10 +174,12 @@ export async function POST(request: NextRequest) {
     console.error('Error message:', error instanceof Error ? error.message : 'Unknown error')
     console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace')
 
-    // ตรวจสอบข้อผิดพลาดฐานข้อมูลเฉพาะ
+    // ตรวจสอบข้อผิดพลาดฐานข้อมูลเฉพาะ (P2002: Unique Constraint Failed)
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+      const target = (error as { meta?: { target?: string[] | string } }).meta?.target
+      const isStudentId = Array.isArray(target) ? target.includes('studentId') : target === 'studentId'
       return NextResponse.json(
-        { error: 'อีเมลนี้มีการใช้งานแล้ว' },
+        { error: isStudentId ? 'รหัสผู้เรียนนี้มีการใช้งานแล้ว' : 'อีเมลนี้มีการใช้งานแล้ว' },
         { status: 400 }
       )
     }

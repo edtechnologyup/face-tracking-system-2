@@ -64,19 +64,19 @@ export async function POST(request: NextRequest) {
     // ตรวจสอบว่ามีท่าที่จำเป็นหรือไม่
     const providedPoses = Object.keys(faceData)
     
-    // อนุญาตท่าบางส่วน (ต้องมีท่าหน้าตรงอย่างน้อย)
-    if (!faceData.front || !Array.isArray(faceData.front) || faceData.front.length !== 128) {
+    // อนุญาตท่าบางส่วน (ต้องมีท่าหน้าตรงอย่างน้อย - รองรับทั้ง ArcFace 512D และ legacy 128D)
+    if (!faceData.front || !Array.isArray(faceData.front) || (faceData.front.length !== 512 && faceData.front.length !== 128)) {
       return NextResponse.json(
-        { error: 'ต้องมีข้อมูลใบหน้าท่าหน้าตรงอย่างน้อย' },
+        { error: 'ต้องมีข้อมูลใบหน้าท่าหน้าตรงอย่างน้อย (512D หรือ 128D)' },
         { status: 400 }
       )
     }
 
     // ตรวจสอบแต่ละท่าที่ให้มา
     for (const [pose, data] of Object.entries(faceData)) {
-      if (!Array.isArray(data) || data.length !== 128) {
+      if (!Array.isArray(data) || (data.length !== 512 && data.length !== 128)) {
         return NextResponse.json(
-          { error: `ข้อมูลใบหน้าท่า${pose}ไม่ถูกต้อง` },
+          { error: `ข้อมูลใบหน้าท่า${pose}ไม่ถูกต้อง (ต้องเป็นขนาด 512D หรือ 128D)` },
           { status: 400 }
         )
       }

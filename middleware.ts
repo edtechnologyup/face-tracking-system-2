@@ -9,9 +9,16 @@ async function verifyJWT(token: string, secret: string): Promise<{ userId: strin
 
     const [headerB64, payloadB64, signatureB64] = parts;
     
-    // Decode payload safely
-    const payloadStr = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'));
+    // Decode payload safely with base64url padding
+    const base64Payload = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = base64Payload.padEnd(base64Payload.length + (4 - (base64Payload.length % 4)) % 4, '=');
+    const payloadStr = atob(paddedPayload);
     const payload = JSON.parse(payloadStr);
+
+    // Verify token expiration (exp)
+    if (payload.exp && Date.now() >= payload.exp * 1000) {
+      return null;
+    }
 
     // Verify signature
     const encoder = new TextEncoder();
@@ -26,9 +33,11 @@ async function verifyJWT(token: string, secret: string): Promise<{ userId: strin
       ['verify']
     );
 
-    // Decode signature from base64url
+    // Decode signature from base64url with padding
+    const base64Sig = signatureB64.replace(/-/g, '+').replace(/_/g, '/');
+    const paddedSig = base64Sig.padEnd(base64Sig.length + (4 - (base64Sig.length % 4)) % 4, '=');
     const signatureBin = Uint8Array.from(
-      atob(signatureB64.replace(/-/g, '+').replace(/_/g, '/')),
+      atob(paddedSig),
       c => c.charCodeAt(0)
     );
 

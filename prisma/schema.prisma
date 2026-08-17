@@ -78,6 +78,7 @@ model TrackingLog {
 enum DetectionType {
   FACE_ORIENTATION
   FACE_DETECTION_LOSS
+  SECURITY_VIOLATION
 }
 
 model SessionStatistics {
@@ -94,6 +95,9 @@ model SessionStatistics {
   // Face detection loss summary
   faceDetectionLoss     Int      @default(0) // จำนวนครั้งที่สูญเสียการตรวจจับใบหน้า
   totalLossTime         Int      @default(0) // seconds - เวลารวมที่สูญเสียการตรวจจับ
+  
+  // Security violations summary
+  securityViolationCount Int     @default(0) // จำนวนเหตุการณ์ผิดปกติทางการสอบ (Security Violations)
   
   session               TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   

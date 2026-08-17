@@ -381,19 +381,15 @@ export function EngineComparison() {
                 <td className="px-4 py-3 font-semibold text-gray-900">ความแม่นยำ (Real-Time Confidence)</td>
                 <td className="px-4 py-3 text-green-700 bg-green-50/30">
                   <div className="font-bold text-green-600">{((results.mediapipe.data?.confidence || 0.985) * 100).toFixed(1)}%</div>
-                  <div className="text-xs text-gray-500">WFLW NME: 2.3%</div>
                 </td>
                 <td className="px-4 py-3 text-blue-700 bg-blue-50/30">
                   <div className="font-bold text-blue-600">{(results.yolov8.confidence * 100).toFixed(1)}%</div>
-                  <div className="text-xs text-gray-500">WIDER FACE mAP: 94.8%</div>
                 </td>
                 <td className="px-4 py-3 text-amber-700 bg-amber-50/30">
                   <div className="font-bold text-amber-600">{(results.dlib.confidence * 100).toFixed(1)}%</div>
-                  <div className="text-xs text-gray-500">300W NME: 5.4%</div>
                 </td>
                 <td className="px-4 py-3 text-purple-700 bg-purple-50/30">
                   <div className="font-bold text-purple-600">{(results.openface.confidence * 100).toFixed(1)}%</div>
-                  <div className="text-xs text-gray-500">DISFA AU F1: 0.86</div>
                 </td>
               </tr>
               <tr>
