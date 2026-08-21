@@ -286,10 +286,12 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
       if (isReady) {
         const nextCount = poseStableCount + 1;
         setPoseStableCount(nextCount);
-        setPoseProgress(Math.min(90, nextCount * 10));
         
-        // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) จับภาพอัตโนมัติ
-        if (nextCount >= 10) {
+        // ท่ากระพริบตาใช้เวลาสั้นกว่า (3 เฟรม ~300ms) ท่าอื่นใช้ (10 เฟรม ~1 วินาที)
+        const requiredCount = targetPose === 'blink' ? 3 : 10;
+        setPoseProgress(Math.min(90, Math.round((nextCount / requiredCount) * 100)));
+        
+        if (nextCount >= requiredCount) {
           handleAutoCapture();
         }
       } else {

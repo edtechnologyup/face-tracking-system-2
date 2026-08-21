@@ -13,13 +13,13 @@ export function isPoseReady(
   confidence: number,
   isBlinking?: boolean
 ): boolean {
-  // ความมั่นใจต้องมากกว่า 70%
-  if (confidence < 0.7) return false;
-  
   // สำหรับท่ากระพริบตา
   if (targetPose === 'blink') {
-    return isBlinking === true;
+    return isBlinking === true && confidence >= 0.5;
   }
+  
+  // ความมั่นใจต้องมากกว่า 70% สำหรับท่าอื่นๆ
+  if (confidence < 0.7) return false;
   
   // สำหรับท่าใบหน้าทั่วไป
   return currentPose === targetPose;

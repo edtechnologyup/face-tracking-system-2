@@ -312,7 +312,7 @@ function detectBlinking(landmarks: faceApiImport.FaceLandmarks68): boolean {
   const avgEAR = (leftEAR + rightEAR) / 2;
   
   // เกณฑ์สำหรับการกระพริบ (ค่าต่ำแสดงว่าตาปิด)
-  const blinkThreshold = 0.25;
+  const blinkThreshold = 0.28;
   
   console.log('การตรวจจับการกระพริบ:', {
     leftEAR: leftEAR.toFixed(3),
