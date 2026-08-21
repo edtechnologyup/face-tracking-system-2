@@ -2,7 +2,10 @@
 CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'USER');
 
 -- CreateEnum
-CREATE TYPE "DetectionType" AS ENUM ('EYE_MOVEMENT', 'MOUTH_MOVEMENT', 'FACE_ORIENTATION', 'FACE_DETECTION_LOSS', 'DISTANCE_VIOLATION');
+CREATE TYPE "SessionStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'INTERRUPTED');
+
+-- CreateEnum
+CREATE TYPE "DetectionType" AS ENUM ('FACE_ORIENTATION', 'FACE_DETECTION_LOSS', 'SECURITY_VIOLATION');
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -14,6 +17,7 @@ CREATE TABLE "users" (
     "lastName" TEXT NOT NULL,
     "studentId" TEXT,
     "phoneNumber" TEXT,
+    "section" TEXT,
     "faceData" TEXT,
     "role" "UserRole" NOT NULL DEFAULT 'USER',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
@@ -23,9 +27,6 @@ CREATE TABLE "users" (
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
--- CreateEnum
-CREATE TYPE "SessionStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'INTERRUPTED');
-
 -- CreateTable
 CREATE TABLE "tracking_sessions" (
     "id" TEXT NOT NULL,
@@ -34,7 +35,7 @@ CREATE TABLE "tracking_sessions" (
     "startTime" TIMESTAMP(3) NOT NULL,
     "endTime" TIMESTAMP(3),
     "totalDuration" INTEGER,
-    "status" "SessionStatus" NOT NULL DEFAULT 'IN_PROGRESS',
+    "status" TEXT,
 
     CONSTRAINT "tracking_sessions_pkey" PRIMARY KEY ("id")
 );
@@ -46,6 +47,7 @@ CREATE TABLE "tracking_logs" (
     "detectionType" "DetectionType" NOT NULL,
     "detectionData" JSONB NOT NULL,
     "confidence" DOUBLE PRECISION,
+    "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "tracking_logs_pkey" PRIMARY KEY ("id")
 );
@@ -58,6 +60,7 @@ CREATE TABLE "session_statistics" (
     "timeOffScreen" INTEGER NOT NULL DEFAULT 0,
     "faceDetectionLoss" INTEGER NOT NULL DEFAULT 0,
     "totalLossTime" INTEGER NOT NULL DEFAULT 0,
+    "securityViolationCount" INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "session_statistics_pkey" PRIMARY KEY ("id")
 );
@@ -75,6 +78,9 @@ CREATE INDEX "tracking_logs_sessionId_idx" ON "tracking_logs"("sessionId");
 CREATE INDEX "tracking_logs_detectionType_idx" ON "tracking_logs"("detectionType");
 
 -- CreateIndex
+CREATE INDEX "tracking_logs_timestamp_idx" ON "tracking_logs"("timestamp");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "session_statistics_sessionId_key" ON "session_statistics"("sessionId");
 
 -- AddForeignKey
@@ -85,4 +91,3 @@ ALTER TABLE "tracking_logs" ADD CONSTRAINT "tracking_logs_sessionId_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "session_statistics" ADD CONSTRAINT "session_statistics_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "tracking_sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
