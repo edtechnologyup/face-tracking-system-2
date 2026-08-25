@@ -35,6 +35,16 @@ model User {
   @@map("users")
 }
 
+model Section {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. "Sec 1", "Sec 2", "Sec 11"
+  name      String   // e.g. "Section 1 (กลุ่ม 1)"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sections")
+}
+
 enum SessionStatus {
   IN_PROGRESS
   COMPLETED
@@ -55,19 +65,26 @@ model TrackingSession {
   trackingLogs  TrackingLog[]
   statistics    SessionStatistics?
   
+  // Model-specific benchmark logs
+  mediapipeLogs MediaPipeLog[]
+  yolov8Logs    Yolov8Log[]
+  dlibLogs      DlibLog[]
+  openFaceLogs  OpenFaceLog[]
+
   @@map("tracking_sessions")
 }
 
 model TrackingLog {
-  id              String          @id @default(cuid())
-  sessionId       String
-  detectionType   DetectionType
-  detectionData   Json            // Flexible JSON data for different detection types
-  confidence      Float?          // Confidence level (0-1)
-  timestamp       DateTime        @default(now())
+  id                  String          @id @default(cuid())
+  sessionId           String
+  detectionType       DetectionType
+  detectionData       Json            // Flexible JSON data for different detection types
+  confidence          Float?          // General Confidence level (0-1)
+  
+  timestamp           DateTime        @default(now())
   
   // Relations
-  session         TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session             TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   
   @@map("tracking_logs")
   @@index([sessionId])
@@ -79,6 +96,7 @@ enum DetectionType {
   FACE_ORIENTATION
   FACE_DETECTION_LOSS
   SECURITY_VIOLATION
+  BENCHMARK_METRICS
 }
 
 model SessionStatistics {
@@ -99,8 +117,91 @@ model SessionStatistics {
   // Security violations summary
   securityViolationCount Int     @default(0) // จำนวนเหตุการณ์ผิดปกติทางการสอบ (Security Violations)
   
+  // Live Benchmark Matrix Summary (4 AI Engines: MediaPipe, YOLOv8-Face, Dlib 68-Point, OpenFace)
+  benchmarkMetrics      Json?    // Multi-engine benchmark performance data
+
   session               TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   
   @@map("session_statistics")
+}
+
+// ==========================================
+// MODEL-SPECIFIC BENCHMARK LOG TABLES
+// ==========================================
+
+model MediaPipeLog {
+  id             String          @id @default(cuid())
+  sessionId      String
+  isDetected     Boolean         @default(true)
+  fps            Float?          // ความเร็ว (FPS)
+  latencyMs      Float?          // เวลาประมวลผล (ms)
+  landmarksCount Int?            @default(468) // จำนวนจุด Landmarks
+  memoryMb       Float?          // ทรัพยากร RAM (MB)
+  cpuLoadPct     Float?          // ทรัพยากร CPU (%)
+  confidence     Float?          // ความแม่นยำ (0.0 - 1.0)
+  timestamp      DateTime        @default(now())
+
+  session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("mediapipe_logs")
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+model Yolov8Log {
+  id             String          @id @default(cuid())
+  sessionId      String
+  isDetected     Boolean         @default(true)
+  fps            Float?          // ความเร็ว (FPS)
+  latencyMs      Float?          // เวลาประมวลผล (ms)
+  landmarksCount Int?            @default(5) // จำนวนจุด Landmarks
+  memoryMb       Float?          // ทรัพยากร RAM (MB)
+  cpuLoadPct     Float?          // ทรัพยากร CPU (%)
+  confidence     Float?          // ความแม่นยำ (0.0 - 1.0)
+  timestamp      DateTime        @default(now())
+
+  session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("yolov8_logs")
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+model DlibLog {
+  id             String          @id @default(cuid())
+  sessionId      String
+  isDetected     Boolean         @default(true)
+  fps            Float?          // ความเร็ว (FPS)
+  latencyMs      Float?          // เวลาประมวลผล (ms)
+  landmarksCount Int?            @default(68) // จำนวนจุด Landmarks
+  memoryMb       Float?          // ทรัพยากร RAM (MB)
+  cpuLoadPct     Float?          // ทรัพยากร CPU (%)
+  confidence     Float?          // ความแม่นยำ (0.0 - 1.0)
+  timestamp      DateTime        @default(now())
+
+  session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("dlib_logs")
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+model OpenFaceLog {
+  id             String          @id @default(cuid())
+  sessionId      String
+  isDetected     Boolean         @default(true)
+  fps            Float?          // ความเร็ว (FPS)
+  latencyMs      Float?          // เวลาประมวลผล (ms)
+  landmarksCount Int?            @default(68) // จำนวนจุด Landmarks
+  memoryMb       Float?          // ทรัพยากร RAM (MB)
+  cpuLoadPct     Float?          // ทรัพยากร CPU (%)
+  confidence     Float?          // ความแม่นยำ (0.0 - 1.0)
+  timestamp      DateTime        @default(now())
+
+  session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("openface_logs")
+  @@index([sessionId])
+  @@index([timestamp])
 }
         

@@ -107,7 +107,38 @@ export async function POST(request: NextRequest) {
       where: { email: normalizedEmail }
     })
 
+    const JWT_SECRET = process.env.JWT_SECRET
+    if (!JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured')
+    }
+
     if (existingUser) {
+      // หากมีผู้ใช้งานแล้วแต่ยังไม่ได้ลงทะเบียนใบหน้า (faceData เป็น null)
+      if (!existingUser.faceData) {
+        console.log('User exists but faceData is null. Re-issuing registrationToken for:', email)
+        const registrationToken = jwt.sign(
+          { userId: existingUser.id, purpose: 'face-registration' },
+          JWT_SECRET,
+          { expiresIn: '30m' }
+        )
+
+        return NextResponse.json({
+          success: true,
+          message: 'พบบัญชีที่ยังไม่ได้บันทึกใบหน้า นำท่านไปสู่ขั้นตอนลงทะเบียนใบหน้า',
+          registrationToken,
+          user: {
+            id: existingUser.id,
+            email: existingUser.email,
+            title: existingUser.title,
+            firstName: existingUser.firstName,
+            lastName: existingUser.lastName,
+            studentId: existingUser.studentId,
+            phoneNumber: existingUser.phoneNumber,
+            section: existingUser.section
+          }
+        }, { status: 200 })
+      }
+
       console.log('User already exists:', email)
       return NextResponse.json(
         { error: 'อีเมลนี้มีการใช้งานแล้ว' },
@@ -139,16 +170,11 @@ export async function POST(request: NextRequest) {
 
     console.log('User created successfully:', user.id)
 
-    // สร้าง registration token สำหรับขั้นตอนลงทะเบียนใบหน้า (อายุ 10 นาที)
-    const JWT_SECRET = process.env.JWT_SECRET
-    if (!JWT_SECRET) {
-      throw new Error('JWT_SECRET is not configured')
-    }
-
+    // สร้าง registration token สำหรับขั้นตอนลงทะเบียนใบหน้า (อายุ 30 นาที)
     const registrationToken = jwt.sign(
       { userId: user.id, purpose: 'face-registration' },
       JWT_SECRET,
-      { expiresIn: '10m' }
+      { expiresIn: '30m' }
     )
 
     // ส่งคืนผลลัพธ์ที่สำเร็จ (ไม่ส่ง password กลับ)

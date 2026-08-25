@@ -6,14 +6,23 @@ export function useCamera() {
 
   const initializeCamera = useCallback(async (videoRef: React.RefObject<HTMLVideoElement | null>) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
-        },
-        audio: false
-      })
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        })
+      } catch (err) {
+        console.warn('Initial camera constraints failed, trying basic mobile facingMode constraint:', err)
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' },
+          audio: false
+        })
+      }
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
@@ -22,7 +31,7 @@ export function useCamera() {
         return new Promise<boolean>((resolve) => {
           if (videoRef.current) {
             videoRef.current.onloadedmetadata = () => {
-              videoRef.current?.play()
+              videoRef.current?.play().catch(console.error)
               resolve(true)
             }
           }

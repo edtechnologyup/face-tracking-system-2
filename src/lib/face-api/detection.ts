@@ -24,9 +24,10 @@ const faceapi: typeof faceApiImport =
 let isModelLoaded = false;
 let isLoading = false;
 
-// URL ของโมเดลจาก CDN (ตัวเลือกแรกและตัวเลือกสำรอง)
+// URL ของโมเดลจาก CDN (หลายแหล่งเพื่อป้องกัน CDN ขัดข้อง)
 const PRIMARY_MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
 const FALLBACK_MODEL_URL = "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
+const UNPKG_MODEL_URL = "https://unpkg.com/@vladmandic/face-api@1.7.12/model";
 
 /**
  * โหลดโมเดล AI สำหรับการตรวจจับใบหน้า
@@ -59,7 +60,7 @@ export async function loadFaceApiModels() {
       faceapi.nets.tinyFaceDetector.loadFromUri(PRIMARY_MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(PRIMARY_MODEL_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(PRIMARY_MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(PRIMARY_MODEL_URL), // สำหรับตรวจจับการกระพริบตา
+      faceapi.nets.faceExpressionNet.loadFromUri(PRIMARY_MODEL_URL),
     ]);
 
     isModelLoaded = true;
@@ -72,20 +73,36 @@ export async function loadFaceApiModels() {
 
   try {
     console.log("กำลังโหลดโมเดล face-api (จาก GitHub Raw)...");
-    // ลองโหลดจาก GitHub Raw เป็นตัวเลือกสำรอง
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(FALLBACK_MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(FALLBACK_MODEL_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(FALLBACK_MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(FALLBACK_MODEL_URL), // สำหรับตรวจจับการกระพริบตา
+      faceapi.nets.faceExpressionNet.loadFromUri(FALLBACK_MODEL_URL),
     ]);
 
     isModelLoaded = true;
     isLoading = false;
     console.log("โหลดโมเดล face-api สำเร็จจาก GitHub Raw");
+    return;
+  } catch (error) {
+    console.warn("ไม่สามารถโหลดโมเดลจาก GitHub Raw ได้ กำลังลองโหลดจาก Unpkg...", error);
+  }
+
+  try {
+    console.log("กำลังโหลดโมเดล face-api (จาก Unpkg CDN)...");
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(UNPKG_MODEL_URL),
+      faceapi.nets.faceLandmark68Net.loadFromUri(UNPKG_MODEL_URL),
+      faceapi.nets.faceRecognitionNet.loadFromUri(UNPKG_MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(UNPKG_MODEL_URL),
+    ]);
+
+    isModelLoaded = true;
+    isLoading = false;
+    console.log("โหลดโมเดล face-api สำเร็จจาก Unpkg CDN");
   } catch (error) {
     isLoading = false;
-    console.error("ข้อผิดพลาดในการโหลดโมเดล face-api ทั้งสองแหล่ง:", error);
+    console.error("ข้อผิดพลาดในการโหลดโมเดล face-api ทั้งสามแหล่ง:", error);
     throw new Error("ไม่สามารถโหลดโมเดล AI ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต");
   }
 }
@@ -108,10 +125,10 @@ export async function detectFaceAndGetDescriptor(
 
     console.log("กำลังตรวจจับใบหน้า...");
 
-    // ตั้งค่าการตรวจจับใบหน้า
+    // ตั้งค่าการตรวจจับใบหน้า (ใช้ inputSize 320 และ scoreThreshold 0.20 เพื่อตรวจจับได้รวดเร็วและแม่นยำทุกแสง)
     const detectionOptions = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 416, // ขนาดที่ใหญ่ขึ้นเพื่อความแม่นยำ
-      scoreThreshold: 0.3 // เกณฑ์สำหรับการตรวจจับ (ปรับสอดคล้องกับ detectFacePose เพื่อรองรับการหันหน้า)
+      inputSize: 320,
+      scoreThreshold: 0.20
     });
 
     // ตรวจจับใบหน้าพร้อมจุดสำคัญและลายเซ็นใบหน้า
@@ -125,7 +142,7 @@ export async function detectFaceAndGetDescriptor(
     }
 
     // ตรวจสอบความมั่นใจในการตรวจจับ (ถ้าไม่ได้ระบุให้ข้าม)
-    if (!skipValidation && detection.detection.score < 0.3) {
+    if (!skipValidation && detection.detection.score < 0.20) {
       throw new Error("คุณภาพการตรวจจับใบหน้าไม่เพียงพอ กรุณาปรับแสงและตำแหน่ง");
     }
 
@@ -165,8 +182,8 @@ export async function detectFacePose(
     }
 
     const detectionOptions = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 416,
-      scoreThreshold: 0.3
+      inputSize: 320,
+      scoreThreshold: 0.20
     });
 
     const detection = await faceapi
@@ -234,27 +251,23 @@ function analyzeFacePose(landmarks: faceApiImport.FaceLandmarks68): {
   const leftEye = positions[36]; // มุมตาซ้าย
   const rightEye = positions[45]; // มุมตาขวา
   const noseTip = positions[30]; // ปลายจมูก
-  const leftMouth = positions[48]; // มุมปากซ้าย
-  const rightMouth = positions[54]; // มุมปากขวา
   
-  // คำนวณระยะห่างระหว่างตาและปาก
-  const eyeDistance = Math.abs(leftEye.x - rightEye.x);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const mouthDistance = Math.abs(leftMouth.x - rightMouth.x);
+  // คำนวณระยะห่างระหว่างตา
+  const eyeDistance = Math.abs(leftEye.x - rightEye.x) || 1;
   
   // คำนวณมุมหมุนหน้า (yaw)
   const faceCenter = (leftEye.x + rightEye.x) / 2;
   const noseOffset = noseTip.x - faceCenter;
-  const yaw = (noseOffset / eyeDistance) * 100; // แปลงเป็นเปอร์เซ็นต์
+  const yaw = (noseOffset / eyeDistance) * 100;
   
   let pose: 'front' | 'left' | 'right' | 'unknown' = 'unknown';
   
-  if (Math.abs(yaw) < 15) {
+  if (Math.abs(yaw) < 12) {
     pose = 'front';
-  } else if (yaw > 15) {
-    pose = 'left'; // หันซ้าย (จมูกเอียงไปทางขวาของหน้าจอ = ผู้ใช้หันซ้าย)
-  } else if (yaw < -15) {
-    pose = 'right'; // หันขวา (จมูกเอียงไปทางซ้ายของหน้าจอ = ผู้ใช้หันขวา)
+  } else if (yaw >= 12) {
+    pose = 'left';
+  } else if (yaw <= -12) {
+    pose = 'right';
   }
   
   return { pose, yaw };

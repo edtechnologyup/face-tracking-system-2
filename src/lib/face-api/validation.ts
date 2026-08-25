@@ -18,8 +18,8 @@ export function isPoseReady(
     return isBlinking === true && confidence >= 0.5;
   }
   
-  // ความมั่นใจต้องมากกว่า 70% สำหรับท่าอื่นๆ
-  if (confidence < 0.7) return false;
+  // ความมั่นใจต้องมากกว่า 35% สำหรับท่าอื่นๆ (ปรับจาก 70% เพื่อให้ตรวจจับผ่านได้เสถียรบนกล้องเว็บแคม)
+  if (confidence < 0.35) return false;
   
   // สำหรับท่าใบหน้าทั่วไป
   return currentPose === targetPose;
@@ -38,8 +38,8 @@ export function isPoseReadyForLogin(
   targetPose: 'front' | 'left' | 'right',
   confidence: number
 ): boolean {
-  // ความมั่นใจต้องมากกว่า 70%
-  if (confidence < 0.7) return false;
+  // ความมั่นใจต้องมากกว่า 35%
+  if (confidence < 0.35) return false;
   
   return currentPose === targetPose;
 }

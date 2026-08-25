@@ -357,6 +357,87 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
         </div>
       </Card>
 
+      {/* Live Benchmark Matrix Card (If Recorded in DB) */}
+      {(() => {
+        const benchmarkLog = sessionDetail.logs.find(log => log.detectionType === 'BENCHMARK_METRICS')
+        const metrics = benchmarkLog?.detectionData as Record<string, unknown> | undefined
+        if (!metrics) return null
+
+        const mp = metrics.mediapipe as Record<string, unknown> | undefined
+        const yolo = metrics.yolov8 as Record<string, unknown> | undefined
+        const dlib = metrics.dlib as Record<string, unknown> | undefined
+        const openface = metrics.openface as Record<string, unknown> | undefined
+
+        return (
+          <Card className="p-6 bg-white border border-indigo-200 shadow-sm">
+            <h3 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
+              <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg text-base">⚡</span>
+              <span>ตารางสรุปบันทึกประสิทธิภาพ 4 เครื่องมือ (Recorded Live Benchmark Matrix)</span>
+            </h3>
+            <p className="text-xs text-gray-500 mb-4">
+              ข้อมูลประสิทธิภาพและทรัพยากรของทั้ง 4 AI Models ที่ถูกบันทึกลงฐานข้อมูลระหว่างการตรวจจับใบหน้าในเซสชันนี้
+            </p>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-xs">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">โมเดล AI (Engine)</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">ความเร็ว (FPS)</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">เวลาประมวลผล (Latency)</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">จุด Landmarks</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">การใช้ทรัพยากร (RAM / CPU)</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">ความแม่นยำ (Confidence)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {mp && (
+                    <tr className="bg-green-50/30">
+                      <td className="px-4 py-3 font-bold text-green-700">1. MediaPipe (468 3D Mesh)</td>
+                      <td className="px-4 py-3 font-bold text-green-600">{String(mp.fps)} FPS</td>
+                      <td className="px-4 py-3 text-gray-800">{String(mp.latencyMs)} ms</td>
+                      <td className="px-4 py-3 text-gray-800">468 จุด (3D)</td>
+                      <td className="px-4 py-3 text-gray-600">{String(mp.memoryMb)} MB | {String(mp.cpuLoadPct)}% CPU</td>
+                      <td className="px-4 py-3 font-bold text-green-600">{(Number(mp.confidence || 0) * 100).toFixed(1)}%</td>
+                    </tr>
+                  )}
+                  {yolo && (
+                    <tr className="bg-blue-50/30">
+                      <td className="px-4 py-3 font-bold text-blue-700">2. YOLOv8-Face (Bounding Box)</td>
+                      <td className="px-4 py-3 font-bold text-blue-600">{String(yolo.fps)} FPS</td>
+                      <td className="px-4 py-3 text-gray-800">{String(yolo.latencyMs)} ms</td>
+                      <td className="px-4 py-3 text-gray-800">5 จุดหลัก</td>
+                      <td className="px-4 py-3 text-gray-600">{String(yolo.memoryMb)} MB | {String(yolo.cpuLoadPct)}% CPU</td>
+                      <td className="px-4 py-3 font-bold text-blue-600">{(Number(yolo.confidence || 0) * 100).toFixed(1)}%</td>
+                    </tr>
+                  )}
+                  {dlib && (
+                    <tr className="bg-amber-50/30">
+                      <td className="px-4 py-3 font-bold text-amber-700">3. Dlib (68-Point Landmark)</td>
+                      <td className="px-4 py-3 font-bold text-amber-600">{String(dlib.fps)} FPS</td>
+                      <td className="px-4 py-3 text-gray-800">{String(dlib.latencyMs)} ms</td>
+                      <td className="px-4 py-3 text-gray-800">68 จุด (2D)</td>
+                      <td className="px-4 py-3 text-gray-600">{String(dlib.memoryMb)} MB | {String(dlib.cpuLoadPct)}% CPU</td>
+                      <td className="px-4 py-3 font-bold text-amber-600">{(Number(dlib.confidence || 0) * 100).toFixed(1)}%</td>
+                    </tr>
+                  )}
+                  {openface && (
+                    <tr className="bg-purple-50/30">
+                      <td className="px-4 py-3 font-bold text-purple-700">4. OpenFace (Action Units & Gaze)</td>
+                      <td className="px-4 py-3 font-bold text-purple-600">{String(openface.fps)} FPS</td>
+                      <td className="px-4 py-3 text-gray-800">{String(openface.latencyMs)} ms</td>
+                      <td className="px-4 py-3 text-gray-800">68+ จุด</td>
+                      <td className="px-4 py-3 text-gray-600">{String(openface.memoryMb)} MB | {String(openface.cpuLoadPct)}% CPU</td>
+                      <td className="px-4 py-3 font-bold text-purple-600">{(Number(openface.confidence || 0) * 100).toFixed(1)}%</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )
+      })()}
+
       {/* Logs Table with Filter Tabs */}
       <Card className="p-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">

@@ -47,6 +47,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     isActive, 
     mediaPipeData,
     yoloMultiFaceData,
+    dlibData,
+    openFaceData,
+    benchmarkMetrics,
     violations,
     isRecording, 
     orientationStats, 
@@ -59,7 +62,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     getCurrentStats,
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
-    getOrientationHistory
+    getOrientationHistory,
+    getBenchmarkMetrics
   } = useHybridFaceDetection({
     primaryIntervalMs: 100,
     yoloIntervalMs: 1200,
@@ -72,10 +76,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     violationsRef.current = violations
   }, [violations])
 
-
-
-
-  // 🎨 วาดการแสดงผล Sci-Fi Mesh & YOLO Bounding Boxes บน Canvas
+  // 🎨 วาดการแสดงผล Sci-Fi Mesh & 4 AI Models Overlays พร้อมกันบน Canvas
   useEffect(() => {
     const canvas = canvasRef.current
     const video = videoRef.current
@@ -85,32 +86,105 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     if (!ctx) return
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const vw = canvas.width
+    const vh = canvas.height
 
-    // 1. Draw MediaPipe 468-point Mesh for candidate face
+    // 1. Draw MediaPipe 468-point Sci-Fi Mesh (🟢 Green)
     if (mediaPipeData && mediaPipeData.isDetected && mediaPipeData.landmarks) {
-      drawSciFiFaceMesh(ctx, mediaPipeData.landmarks, video, canvas.width, canvas.height, mediaPipeData.orientation.isLookingAway)
+      drawSciFiFaceMesh(ctx, mediaPipeData.landmarks, video, vw, vh, mediaPipeData.orientation.isLookingAway)
     }
 
-    // 2. Draw YOLOv8 Intruder Bounding Boxes
-    if (yoloMultiFaceData && yoloMultiFaceData.boxes) {
-      yoloMultiFaceData.boxes.forEach((box) => {
-        if (!box.isPrimary) {
-          const vx = (box.x / 100) * canvas.width
-          const vy = (box.y / 100) * canvas.height
-          const vw = (box.width / 100) * canvas.width
-          const vh = (box.height / 100) * canvas.height
+    // 2. Draw YOLOv8-Face Bounding Box & 5 Keypoints (🔵 Blue Box + 🔴 Red Keypoints)
+    if (yoloMultiFaceData) {
+      if (yoloMultiFaceData.primaryBox) {
+        const b = yoloMultiFaceData.primaryBox
+        const bx = (b.x / (video.videoWidth || 640)) * vw
+        const by = (b.y / (video.videoHeight || 480)) * vh
+        const bw = (b.width / (video.videoWidth || 640)) * vw
+        const bh = (b.height / (video.videoHeight || 480)) * vh
 
-          ctx.strokeStyle = '#EF4444'
-          ctx.lineWidth = 3
-          ctx.strokeRect(vx, vy, vw, vh)
+        ctx.strokeStyle = '#3B82F6'
+        ctx.lineWidth = 2.5
+        ctx.setLineDash([6, 4])
+        ctx.strokeRect(bx, by, bw, bh)
+        ctx.setLineDash([])
 
+        // YOLO Label
+        ctx.fillStyle = '#3B82F6'
+        ctx.fillRect(bx, Math.max(0, by - 22), 140, 22)
+        ctx.fillStyle = '#FFFFFF'
+        ctx.font = 'bold 11px Inter, sans-serif'
+        ctx.fillText(`YOLOv8-Face (${(b.confidence * 100).toFixed(0)}%)`, bx + 5, Math.max(14, by - 6))
+
+        // 5 Keypoints
+        if (yoloMultiFaceData.keypoints) {
           ctx.fillStyle = '#EF4444'
-          ctx.font = 'bold 12px sans-serif'
-          ctx.fillText(`🚨 INTRUDER (${(box.confidence * 100).toFixed(0)}%)`, vx, vy > 15 ? vy - 5 : vy + 15)
+          yoloMultiFaceData.keypoints.forEach(kp => {
+            const kpx = (kp.x / (video.videoWidth || 640)) * vw
+            const kpy = (kp.y / (video.videoHeight || 480)) * vh
+            ctx.beginPath()
+            ctx.arc(kpx, kpy, 4, 0, 2 * Math.PI)
+            ctx.fill()
+          })
         }
+      }
+
+      // Draw Multi-Face Intruder Bounding Boxes
+      if (yoloMultiFaceData.boxes) {
+        yoloMultiFaceData.boxes.forEach((box) => {
+          if (!box.isPrimary) {
+            const vx = (box.x / (video.videoWidth || 640)) * vw
+            const vy = (box.y / (video.videoHeight || 480)) * vh
+            const vbw = (box.width / (video.videoWidth || 640)) * vw
+            const vbh = (box.height / (video.videoHeight || 480)) * vh
+
+            ctx.strokeStyle = '#EF4444'
+            ctx.lineWidth = 3
+            ctx.strokeRect(vx, vy, vbw, vbh)
+
+            ctx.fillStyle = '#EF4444'
+            ctx.font = 'bold 11px sans-serif'
+            ctx.fillText(`🚨 INTRUDER (${(box.confidence * 100).toFixed(0)}%)`, vx, vy > 15 ? vy - 5 : vy + 15)
+          }
+        })
+      }
+    }
+
+    // 3. Draw Dlib 68-Point Landmarks (🟠 Amber / Orange Dots)
+    if (dlibData && dlibData.isDetected && dlibData.landmarks68) {
+      ctx.fillStyle = '#F59E0B'
+      dlibData.landmarks68.forEach(pt => {
+        const px = (pt.x / (video.videoWidth || 640)) * vw
+        const py = (pt.y / (video.videoHeight || 480)) * vh
+        ctx.beginPath()
+        ctx.arc(px, py, 2.5, 0, 2 * Math.PI)
+        ctx.fill()
       })
     }
-  }, [mediaPipeData, yoloMultiFaceData])
+
+    // 4. Draw OpenFace 3D Gaze Vector & Action Units Target (🟣 Purple Line & Circle)
+    if (openFaceData && openFaceData.isDetected) {
+      const fc = openFaceData.faceCenter ? {
+        x: (openFaceData.faceCenter.x / (video.videoWidth || 640)) * vw,
+        y: (openFaceData.faceCenter.y / (video.videoHeight || 480)) * vh
+      } : { x: vw / 2, y: vh / 2 }
+      const gaze = openFaceData.gazeVector
+
+      // Gaze Vector Line
+      ctx.strokeStyle = '#A855F7'
+      ctx.lineWidth = 4
+      ctx.beginPath()
+      ctx.moveTo(fc.x, fc.y - 15)
+      ctx.lineTo(fc.x + gaze.x * 180, fc.y - 15 + gaze.y * 180)
+      ctx.stroke()
+
+      // Target Gaze Point
+      ctx.fillStyle = '#A855F7'
+      ctx.beginPath()
+      ctx.arc(fc.x + gaze.x * 180, fc.y - 15 + gaze.y * 180, 6, 0, 2 * Math.PI)
+      ctx.fill()
+    }
+  }, [mediaPipeData, yoloMultiFaceData, dlibData, openFaceData])
 
   // 🚀 ส่งภาพ Snapshot เพื่อวิเคราะห์ Phase 3 Deep Analytics (L2CS-Net + MiniFASNet) ไปยัง API
   const sendSnapshotForDeepAnalytics = useCallback(async () => {
@@ -301,7 +375,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
   }, [createTrackingSession, initializeCamera, initializeHybridDetectors, startHybridTracking, startRecording])
 
-  // ฟังก์ชันส่งข้อมูลไป API
+  // ฟังก์ชันส่งข้อมูลไป API (พร้อม 4-Engine Live Benchmark Metrics)
   const saveOrientationData = useCallback(async (
     sessionId: string, 
     events: unknown[], 
@@ -339,6 +413,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         isActive: false
       }))
 
+      const currentBenchmark = getBenchmarkMetrics()
+
       const response = await fetch('/api/tracking/orientation', {
         method: 'POST',
         headers: {
@@ -351,7 +427,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           sessionStats: stats as Record<string, unknown>,
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
           faceDetectionLossEvents: faceDetectionLossEvents || [],
-          securityViolations: violationsRef.current || []
+          securityViolations: violationsRef.current || [],
+          benchmarkMetrics: currentBenchmark || undefined
         }),
         keepalive: isKeepAlive
       })
@@ -371,7 +448,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [getBenchmarkMetrics])
 
   // หยุดบันทึกและแสดงผลลัพธ์
   const handleStopRecording = useCallback(async () => {
@@ -513,7 +590,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           },
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
           faceDetectionLossEvents: faceDetectionLossEvents || [],
-          securityViolations: violationsRef.current || []
+          securityViolations: violationsRef.current || [],
+          benchmarkMetrics: getBenchmarkMetrics() || undefined
         }),
         keepalive: isKeepAlive
       }).catch(err => console.error('Auto-sync orientation error:', err))
@@ -538,7 +616,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     } catch (err) {
       console.error('Flush session data error:', err)
     }
-  }, [stopRecording, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents])
+  }, [stopRecording, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents, getBenchmarkMetrics])
 
   // 🔄 ระบบ Periodic Auto-Sync บันทึกข้อมูลลง DB อัตโนมัติทุกๆ 15 วินาทีระหว่างการติดตาม
   useEffect(() => {
@@ -634,6 +712,17 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
               )}
             </div>
           )}
+
+          {/* 4 Models Live Landmark Overlay Legend HUD Badge */}
+          {isActive && (
+            <div className="absolute top-4 right-4 z-20 hidden sm:flex items-center gap-2 bg-slate-900/85 backdrop-blur-md text-white px-3 py-1.5 rounded-full border border-slate-700/60 shadow-lg text-[11px]">
+              <span className="font-semibold text-gray-300">4-Models Overlay:</span>
+              <span className="flex items-center gap-1 text-emerald-400 font-medium"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>MediaPipe</span>
+              <span className="flex items-center gap-1 text-blue-400 font-medium"><span className="w-2 h-2 rounded-full bg-blue-500"></span>YOLOv8</span>
+              <span className="flex items-center gap-1 text-amber-400 font-medium"><span className="w-2 h-2 rounded-full bg-amber-500"></span>Dlib</span>
+              <span className="flex items-center gap-1 text-purple-400 font-medium"><span className="w-2 h-2 rounded-full bg-purple-500"></span>OpenFace</span>
+            </div>
+          )}
         </div>
 
         {/* Current Primary Detection Status & Live Behavior Event Counters */}
@@ -643,6 +732,95 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           orientationStats={orientationStats}
           faceLossStats={faceLossStats}
         />
+
+        {/* Live Multi-Engine Benchmark Matrix (4 Models Concurrent Detection) */}
+        {isActive && benchmarkMetrics && (
+          <div className="mb-6 p-4 bg-white border border-blue-200 rounded-2xl shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 border-b border-gray-100 pb-2">
+              <h3 className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse shrink-0"></span>
+                <span>⚡ Live Benchmark Matrix (4 AI Models Concurrent System)</span>
+              </h3>
+              <span className="self-start sm:self-auto text-[11px] sm:text-xs bg-blue-50 text-blue-700 font-medium px-2.5 py-0.5 rounded-full border border-blue-200">
+                เรียลไทม์ 4 โมเดล (MediaPipe + YOLOv8 + Dlib + OpenFace)
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-xs">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">โมเดล AI (Engine)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">สถานะ</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">ความเร็ว (FPS)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">เวลาประมวลผล (Latency)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">จุด Landmarks</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">ทรัพยากร (RAM / CPU)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">ความแม่นยำ (Confidence)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  <tr className="bg-green-50/20">
+                    <td className="px-3 py-2 font-bold text-green-700 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                      MediaPipe (468 3D Mesh)
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="bg-green-100 text-green-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                    </td>
+                    <td className="px-3 py-2 font-bold text-green-600">{benchmarkMetrics.mediapipe.fps} FPS</td>
+                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.mediapipe.latencyMs} ms</td>
+                    <td className="px-3 py-2 text-gray-700">468 จุด (3D)</td>
+                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.mediapipe.memoryMb} MB | {benchmarkMetrics.mediapipe.cpuLoadPct}% CPU</td>
+                    <td className="px-3 py-2 font-bold text-green-600">{(benchmarkMetrics.mediapipe.confidence * 100).toFixed(1)}%</td>
+                  </tr>
+                  <tr className="bg-blue-50/20">
+                    <td className="px-3 py-2 font-bold text-blue-700 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      YOLOv8-Face (Bounding Box)
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                    </td>
+                    <td className="px-3 py-2 font-bold text-blue-600">{benchmarkMetrics.yolov8.fps} FPS</td>
+                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.yolov8.latencyMs} ms</td>
+                    <td className="px-3 py-2 text-gray-700">5 จุดหลัก</td>
+                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.yolov8.memoryMb} MB | {benchmarkMetrics.yolov8.cpuLoadPct}% CPU</td>
+                    <td className="px-3 py-2 font-bold text-blue-600">{(benchmarkMetrics.yolov8.confidence * 100).toFixed(1)}%</td>
+                  </tr>
+                  <tr className="bg-amber-50/20">
+                    <td className="px-3 py-2 font-bold text-amber-700 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      Dlib (68-Point Landmark)
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                    </td>
+                    <td className="px-3 py-2 font-bold text-amber-600">{benchmarkMetrics.dlib.fps} FPS</td>
+                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.dlib.latencyMs} ms</td>
+                    <td className="px-3 py-2 text-gray-700">68 จุด (2D)</td>
+                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.dlib.memoryMb} MB | {benchmarkMetrics.dlib.cpuLoadPct}% CPU</td>
+                    <td className="px-3 py-2 font-bold text-amber-600">{(benchmarkMetrics.dlib.confidence * 100).toFixed(1)}%</td>
+                  </tr>
+                  <tr className="bg-purple-50/20">
+                    <td className="px-3 py-2 font-bold text-purple-700 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                      OpenFace (Action Units & Gaze)
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                    </td>
+                    <td className="px-3 py-2 font-bold text-purple-600">{benchmarkMetrics.openface.fps} FPS</td>
+                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.openface.latencyMs} ms</td>
+                    <td className="px-3 py-2 text-gray-700">68+ จุด</td>
+                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.openface.memoryMb} MB | {benchmarkMetrics.openface.cpuLoadPct}% CPU</td>
+                    <td className="px-3 py-2 font-bold text-purple-600">{(benchmarkMetrics.openface.confidence * 100).toFixed(1)}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Phase 3 Backend Analytics Status (MiniFASNet Liveness + L2CS-Net 3D Gaze) */}
         {isActive && analyticsResult && (

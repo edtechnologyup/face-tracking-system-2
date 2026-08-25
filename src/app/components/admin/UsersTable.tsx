@@ -7,6 +7,8 @@ import { Input } from '@/app/components/ui/Input'
 import { Select } from '@/app/components/ui/Select'
 import { PasswordInput } from '@/app/components/ui/PasswordInput'
 import { TITLE_OPTIONS } from '@/app/components/auth/form/TitleOptions'
+import { SECTION_OPTIONS } from '@/app/components/auth/form/RegisterForm'
+import { SectionManagementModal } from './SectionManagementModal'
 import { formatThaiDateTime } from '@/lib/utils/datetime'
 import { 
   validateName, 
@@ -16,6 +18,27 @@ import {
   validateTitle, 
   validatePhoneNumber 
 } from '@/lib/utils/validation'
+
+export function getSectionBadgeStyle(section?: string | null) {
+  if (!section) return 'bg-gray-100 text-gray-500'
+  const num = parseInt(section.replace(/\D/g, ''), 10)
+  const colors = [
+    'bg-purple-100 text-purple-800',
+    'bg-indigo-100 text-indigo-800',
+    'bg-emerald-100 text-emerald-800',
+    'bg-amber-100 text-amber-800',
+    'bg-blue-100 text-blue-800',
+    'bg-rose-100 text-rose-800',
+    'bg-teal-100 text-teal-800',
+    'bg-cyan-100 text-cyan-800',
+    'bg-orange-100 text-orange-800',
+    'bg-pink-100 text-pink-800',
+  ]
+  if (!isNaN(num) && num >= 1 && num <= colors.length) {
+    return colors[num - 1]
+  }
+  return 'bg-purple-100 text-purple-800'
+}
 
 interface User {
   id: string
@@ -40,6 +63,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [isSectionModalOpen, setIsSectionModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
 
   // Form State
@@ -359,17 +383,25 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h2 className="text-xl font-bold text-gray-900">จัดการข้อมูลผู้ใช้งาน</h2>
-        <button
-          onClick={openAddModal}
-          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg font-medium shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          เพิ่มผู้ใช้งาน
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsSectionModalOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-2 bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 rounded-lg font-medium shadow-sm transition-all duration-200 cursor-pointer text-sm"
+          >
+            <span>⚙️</span> จัดการกลุ่มเรียน
+          </button>
+          <button
+            onClick={openAddModal}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg font-medium shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            เพิ่มผู้ใช้งาน
+          </button>
+        </div>
       </div>
 
       {/* Filter Bar */}
@@ -396,8 +428,9 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 cursor-pointer"
           >
             <option value="ALL">ทั้งหมด (All Sections)</option>
-            <option value="Sec 1">Section 1 (กลุ่ม 1)</option>
-            <option value="Sec 2">Section 2 (กลุ่ม 2)</option>
+            {SECTION_OPTIONS.map((opt: { value: string; label: string }) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
             <option value="null">ไม่มีกลุ่มเรียน (N/A)</option>
           </select>
         </div>
@@ -461,11 +494,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.studentId || 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        user.section === 'Sec 1' ? 'bg-purple-100 text-purple-800' :
-                        user.section === 'Sec 2' ? 'bg-indigo-100 text-indigo-800' :
-                        'bg-gray-100 text-gray-500'
-                      }`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getSectionBadgeStyle(user.section)}`}>
                         {user.section || 'ไม่มีกลุ่มเรียน'}
                       </span>
                     </td>
@@ -584,10 +613,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
                   value={formData.section}
                   onChange={handleInputChange('section')}
                   placeholder="เลือกกลุ่มเรียน"
-                  options={[
-                    { value: 'Sec 1', label: 'Section 1 (กลุ่ม 1)' },
-                    { value: 'Sec 2', label: 'Section 2 (กลุ่ม 2)' }
-                  ]}
+                  options={SECTION_OPTIONS}
                   error={errors.section}
                 />
               </div>
@@ -743,10 +769,7 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
                   value={formData.section}
                   onChange={handleInputChange('section')}
                   placeholder="เลือกกลุ่มเรียน"
-                  options={[
-                    { value: 'Sec 1', label: 'Section 1 (กลุ่ม 1)' },
-                    { value: 'Sec 2', label: 'Section 2 (กลุ่ม 2)' }
-                  ]}
+                  options={SECTION_OPTIONS}
                   error={errors.section}
                 />
               </div>
@@ -885,6 +908,13 @@ export function UsersTable({ users, onRefresh }: UsersTableProps) {
           </div>
         </div>
       )}
+
+      {/* Section Management Modal */}
+      <SectionManagementModal
+        isOpen={isSectionModalOpen}
+        onClose={() => setIsSectionModalOpen(false)}
+        onSectionsUpdated={onRefresh}
+      />
     </div>
   )
 }

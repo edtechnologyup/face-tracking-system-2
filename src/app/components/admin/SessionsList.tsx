@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Card } from '@/app/components/ui/Card'
 import { formatThaiDateTime } from '@/lib/utils/datetime'
+import { getSectionBadgeStyle } from './UsersTable'
 
 interface TrackingSession {
   id: string
@@ -136,11 +137,7 @@ export function SessionsList({ sessions, onSessionClick, onRefresh }: SessionsLi
                   return (
                     <tr key={session.id} className="hover:bg-purple-50/20 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          session.user.section === 'Sec 1' ? 'bg-purple-100 text-purple-800' :
-                          session.user.section === 'Sec 2' ? 'bg-indigo-100 text-indigo-800' :
-                          'bg-gray-100 text-gray-500'
-                        }`}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getSectionBadgeStyle(session.user.section)}`}>
                           {session.user.section || 'ไม่มีกลุ่มเรียน'}
                         </span>
                       </td>

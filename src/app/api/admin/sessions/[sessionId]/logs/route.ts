@@ -57,7 +57,11 @@ export async function GET(
             studentId: true,
             section: true
           }
-        }
+        },
+        mediapipeLogs: true,
+        yolov8Logs: true,
+        dlibLogs: true,
+        openFaceLogs: true
       }
     })
 

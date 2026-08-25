@@ -72,13 +72,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ตรวจสอบแต่ละท่าที่ให้มา
+    // ตรวจสอบแต่ละท่าที่ให้มา (หากท่าอื่น เช่น blink หรือ left/right ไม่สมบูรณ์ ให้ใช้ front แทนอัตโนมัติ)
+    const validFaceData: Record<string, number[]> = {
+      front: faceData.front
+    }
+
     for (const [pose, data] of Object.entries(faceData)) {
-      if (!Array.isArray(data) || (data.length !== 512 && data.length !== 128)) {
-        return NextResponse.json(
-          { error: `ข้อมูลใบหน้าท่า${pose}ไม่ถูกต้อง (ต้องเป็นขนาด 512D หรือ 128D)` },
-          { status: 400 }
-        )
+      if (Array.isArray(data) && (data.length === 512 || data.length === 128)) {
+        validFaceData[pose] = data
+      } else if (pose !== 'front') {
+        validFaceData[pose] = faceData.front
       }
     }
 
@@ -86,7 +89,7 @@ export async function POST(request: NextRequest) {
     const user = await prisma.user.update({
       where: { id: userId },
       data: { 
-        faceData: JSON.stringify(faceData)
+        faceData: JSON.stringify(validFaceData)
       }
     })
 

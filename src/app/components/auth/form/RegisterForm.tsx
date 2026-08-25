@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react"
 import { Input } from "@/app/components/ui/Input"
 import { PasswordInput } from "@/app/components/ui/PasswordInput"
 import { Select } from "@/app/components/ui/Select"
@@ -21,10 +22,11 @@ interface RegisterFormProps {
   onBlur: (field: string) => () => void
 }
 
-const SECTION_OPTIONS = [
-  { value: "Sec 1", label: "Section 1 (กลุ่ม 1)" },
-  { value: "Sec 2", label: "Section 2 (กลุ่ม 2)" }
-]
+export const DEFAULT_SECTION_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
+  value: `Sec ${i + 1}`,
+  label: `Sec ${i + 1}`
+}))
+export const SECTION_OPTIONS = DEFAULT_SECTION_OPTIONS
 
 export function RegisterForm({ 
   formData, 
@@ -33,6 +35,25 @@ export function RegisterForm({
   onChange, 
   onBlur 
 }: RegisterFormProps) {
+  const [sections, setSections] = useState<{ value: string; label: string }[]>(DEFAULT_SECTION_OPTIONS)
+
+  useEffect(() => {
+    async function loadSections() {
+      try {
+        const res = await fetch('/api/admin/sections')
+        const data = await res.json()
+        if (res.ok && data.success && Array.isArray(data.sections) && data.sections.length > 0) {
+          setSections(data.sections.map((s: { code: string }) => ({
+            value: s.code,
+            label: s.code
+          })))
+        }
+      } catch (err) {
+        console.warn('Load dynamic sections fallback:', err)
+      }
+    }
+    loadSections()
+  }, [])
   return (
     <>
       <Select
@@ -79,7 +100,7 @@ export function RegisterForm({
           placeholder="กรุณาเลือกกลุ่มเรียน"
           required
           error={errors.section}
-          options={SECTION_OPTIONS}
+          options={sections}
         />
       </div>
       

@@ -180,29 +180,29 @@ export default function TrackingPage() {
         </div>
 
         {/* เนื้อหาหลัก */}
-        <div className="max-w-6xl mx-auto p-6">
-          <div className="grid gap-6 fex">
+        <div className="max-w-6xl mx-auto p-3 sm:p-6">
+          <div className="grid gap-4 sm:gap-6">
             {/* การ์ดติดตาม */}
             {!isTracking ? (
-              <Card className="p-8 min-h-[600px] flex justify-center items-center">
+              <Card className="p-4 sm:p-8 min-h-[380px] sm:min-h-[550px] flex justify-center items-center">
                 <div className="text-center">
-                  <div className="w-24 h-24 mx-auto mb-6 rounded-full flex items-center justify-center bg-gray-100 text-gray-400">
-                    <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-16 h-16 sm:w-24 sm:h-24 mx-auto mb-4 sm:mb-6 rounded-full flex items-center justify-center bg-gray-100 text-gray-400">
+                    <svg className="w-8 h-8 sm:w-12 sm:h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                     </svg>
                   </div>
 
-                  <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
                     พร้อมเริ่มติดตาม
                   </h2>
 
-                  <p className="text-gray-600 mb-6">
+                  <p className="text-sm sm:text-base text-gray-600 mb-6">
                     กดปุ่มเพื่อเปิดกล้องและเริ่มระบบติดตามพฤติกรรม
                   </p>
 
                   <Button
                     onClick={handleStartTracking}
-                    className="px-12 py-4 text-lg"
+                    className="w-full sm:w-auto px-8 sm:px-12 py-3.5 sm:py-4 text-base sm:text-lg font-semibold shadow-md active:scale-95 transition-transform"
                   >
                     🎥 เริ่มติดตาม
                   </Button>
