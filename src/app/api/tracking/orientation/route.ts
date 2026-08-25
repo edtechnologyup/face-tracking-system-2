@@ -272,8 +272,6 @@ export async function POST(request: NextRequest) {
       where: { sessionId: sessionId }
     })
 
-    const bmObj = benchmarkMetrics ? (benchmarkMetrics as Record<string, { confidence?: number }>) : null
-
     // === FACE TRACKING SUMMARY (No Duplicated Data) ===
     const statsData = {
       // Face orientation counts only - ข้อมูลสรุปจำนวนครั้ง
