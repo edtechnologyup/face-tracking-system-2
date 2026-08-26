@@ -24,8 +24,8 @@ const faceapi: typeof faceApiImport =
 let isModelLoaded = false;
 let isLoading = false;
 
-// URL ของโมเดลถูกโหลดจากเซิร์ฟเวอร์โดยตรง (Local /models) เพื่อให้เปิดกล้องได้ทันที
-const PRIMARY_MODEL_URL = "/models";
+// URL ของโมเดลเปลี่ยนไปดึงจาก CDN (UNPKG) เพื่อลดภาระเซิร์ฟเวอร์
+const PRIMARY_MODEL_URL = "https://unpkg.com/@vladmandic/face-api@1.7.12/model";
 const FALLBACK_MODEL_URL = "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
 const UNPKG_MODEL_URL = "https://unpkg.com/@vladmandic/face-api@1.7.12/model";
 
