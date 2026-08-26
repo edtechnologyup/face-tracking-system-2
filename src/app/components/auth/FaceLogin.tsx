@@ -22,9 +22,9 @@ interface PoseData {
   icon: string
 }
 
-const POSE_TIMEOUT_SECONDS = 10
+const POSE_TIMEOUT_SECONDS = 20
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const POSE_STABLE_COUNT_THRESHOLD = 10
+const POSE_STABLE_COUNT_THRESHOLD = 4
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const DETECTION_INTERVAL = 100
 
@@ -273,14 +273,14 @@ export function FaceLogin({ isOpen, onSuccess, onCancel }: FaceLoginProps) {
       clearTimeout(poseTimeoutRef.current)
     }
     
-    // รีเซ็ตเวลาเป็น 10 วินาที
+    // รีเซ็ตเวลาตาม POSE_TIMEOUT_SECONDS (20 วินาที)
     setPoseTimeRemaining(POSE_TIMEOUT_SECONDS)
     setIsTimeoutWarning(false)
     
-    // ตั้งตัวจับเวลา 10 วินาที
+    // ตั้งตัวจับเวลา 20 วินาที
     poseTimeoutRef.current = setTimeout(() => {
       handlePoseTimeout()
-    }, 10000) // 10 วินาที = 10,000 มิลลิวินาที
+    }, POSE_TIMEOUT_SECONDS * 1000)
   }, [handlePoseTimeout])
 
   const handleFinalVerification = useCallback(async () => {
@@ -399,20 +399,23 @@ export function FaceLogin({ isOpen, onSuccess, onCancel }: FaceLoginProps) {
       if (isReady) {
         const nextCount = poseStableCount + 1
         setPoseStableCount(nextCount)
-        setPoseProgress(Math.min(90, nextCount * 10))
         
-        // หากท่าคงที่เป็นเวลา 10 ครั้งติดต่อกัน (~1 วินาที) ยืนยันอัตโนมัติ
-        if (nextCount >= 10) {
+        const requiredCount = 4
+        setPoseProgress(Math.min(90, Math.round((nextCount / requiredCount) * 100)))
+        
+        // หากท่าคงที่เป็นเวลา 4 เฟรมติดต่อกัน (~400ms) ยืนยันอัตโนมัติ
+        if (nextCount >= requiredCount) {
           handleAutoVerify()
         }
       } else {
-        setPoseStableCount(0)
-        setPoseProgress(0)
+        // ผ่อนปรนโดยไม่รีเซ็ตเป็น 0 ทันที เพื่อป้องกันปัญหามือสั่นหรือกล้องกระตุกหลุดเฟรม
+        setPoseStableCount(prev => Math.max(0, prev - 1))
+        setPoseProgress(prev => Math.max(0, Math.round((Math.max(0, prev - 1) / 4) * 100)))
       }
     }
   }, [currentDetectedPose, poseConfidence, poseStableCount, autoVerifying, isVerifyingPose, isPoseVerified, selectedPose, handleAutoVerify])
   
-  // ตั้งเวลาสำหรับท่าเดียว (10 วินาที)
+  // ตั้งเวลาสำหรับท่าเดียว (20 วินาที)
   useEffect(() => {
     if (!isPoseVerified && !isVerifyingPose && isStreaming && !isModelLoading && selectedPose) {
       startPoseTimeout()
@@ -482,6 +485,20 @@ export function FaceLogin({ isOpen, onSuccess, onCancel }: FaceLoginProps) {
           currentPose={currentPose}
           poseConfidence={poseConfidence}
         />
+
+        {!isPoseVerified && isStreaming && !isModelLoading && (
+          <div className="mb-4 text-center">
+            <button
+              type="button"
+              onClick={handleAutoVerify}
+              disabled={loading || autoVerifying || isVerifyingPose}
+              className="w-full py-2.5 px-4 bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-700 text-sm font-semibold rounded-lg border border-purple-200 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+            >
+              <span>📸</span>
+              <span>ยืนยันตัวตนด้วยภาพนี้ทันที (หากแสกนไม่ติด)</span>
+            </button>
+          </div>
+        )}
 
         <PoseInstructionPanel 
           isPoseVerified={isPoseVerified}
