@@ -1,47 +1,33 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useRef } from 'react'
+const fs = require('fs');
+const path = 'src/app/components/tracking/BehaviorFeatureSync.tsx';
+let content = fs.readFileSync(path, 'utf8');
 
-export interface BehaviorFeatureSyncProps {
-  isActive: boolean
-  sessionId: string | null
-  mediaPipeData: any
-  yoloData: any
-  dlibData: any
-  openFaceData: any
-}
-
-export function BehaviorFeatureSync({
-  isActive,
-  sessionId,
-  mediaPipeData,
-  yoloData,
-  dlibData,
-  openFaceData
-}: BehaviorFeatureSyncProps) {
-  const logBufferRef = useRef<any[]>([])
-  const sampleIndexRef = useRef<number>(0)
-  const lastSyncTimeRef = useRef<number>(Date.now())
-  const lastSampleTimeRef = useRef<number>(Date.now())
-
-  // Sample data at ~10Hz (every 100ms)
-  useEffect(() => {
-    if (!isActive || !sessionId) return
-
-    const now = Date.now()
-    if (now - lastSampleTimeRef.current < 100) return // Throttle to 100ms
-    lastSampleTimeRef.current = now
-
-    const hasFace = !!(mediaPipeData?.isDetected || yoloData?.isDetected)
-    
-    // Build a log entry
-    const logEntry: any = {
-      timestamp: new Date().toISOString(),
-      elapsedMs: now - lastSyncTimeRef.current, // will adjust before sending
-      sampleIndex: sampleIndexRef.current++,
-      phase: 'TRACKING',
-      scenario: 'HYBRID_MODE',
+const oldLogic = `      faceDetected: hasFace,
+      faceCount: yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0),
+      faceConfidence: yoloData?.confidence || mediaPipeData?.confidence || null,
       
-      faceDetected: hasFace,
+      // Box & Distance
+      bboxWidth: mediaPipeData?.distance?.faceWidth || null,
+      bboxHeight: mediaPipeData?.distance?.faceHeight || null,
+      faceDistanceCm: mediaPipeData?.distance?.estimatedCm || null,
+      
+      // Head Pose
+      headYaw: mediaPipeData?.orientation?.yaw || null,
+      headPitch: mediaPipeData?.orientation?.pitch || null,
+      
+      // Model Confidences
+      yoloConfidence: yoloData?.confidence || null,
+      mediapipeConfidence: mediaPipeData?.confidence || null,
+      dlibConfidence: dlibData?.confidence || null,
+      openfaceConfidence: openFaceData?.confidence || null,
+      
+      landmarkCount: mediaPipeData?.landmarks ? mediaPipeData.landmarks.length : null,
+      
+      cameraFps: 30, // approximate
+      isValid: hasFace
+    }`;
+
+const newLogic = `      faceDetected: hasFace,
       faceCount: yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0),
       faceConfidence: yoloData?.confidence || mediaPipeData?.confidence || null,
       
@@ -100,8 +86,8 @@ export function BehaviorFeatureSync({
       const lms = mediaPipeData.landmarks;
       
       // Bounding Box & Center
-      const xs = lms.map((l: any) => l.x);
-      const ys = lms.map((l: any) => l.y);
+      const xs = lms.map(l => l.x);
+      const ys = lms.map(l => l.y);
       const minX = Math.min(...xs), maxX = Math.max(...xs);
       const minY = Math.min(...ys), maxY = Math.max(...ys);
       logEntry.bboxX = minX;
@@ -110,7 +96,7 @@ export function BehaviorFeatureSync({
       logEntry.faceCenterY = (minY + maxY) / 2;
       
       // Eye Aspect Ratio (EAR) - MediaPipe indices
-      const calcEAR = (p1: number, p2: number, p3: number, p4: number, p5: number, p6: number) => {
+      const calcEAR = (p1, p2, p3, p4, p5, p6) => {
         if(!lms[p1] || !lms[p6]) return null;
         const v1 = Math.hypot(lms[p2].x - lms[p6].x, lms[p2].y - lms[p6].y);
         const v2 = Math.hypot(lms[p3].x - lms[p5].x, lms[p3].y - lms[p5].y);
@@ -144,50 +130,13 @@ export function BehaviorFeatureSync({
         logEntry.cameraWidth = window.innerWidth;
         logEntry.cameraHeight = window.innerHeight;
       }
-    } catch {}
-    
+    } catch(e) {}
+    `;
 
-    logBufferRef.current.push(logEntry)
-
-    // Auto-sync every 50 frames (approx 5 seconds)
-    if (logBufferRef.current.length >= 50) {
-      const logsToSend = [...logBufferRef.current]
-      logBufferRef.current = [] // reset buffer
-      
-      // Send to API in background
-      fetch('/api/tracking/behavior-features', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          logs: logsToSend
-        })
-      }).catch(err => {
-        console.error('Failed to sync behavior features:', err)
-        // If fail, we drop them to avoid memory leaks or retry logic if needed
-      })
-    }
-  }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData])
-
-  // Sync on unmount or stop
-  useEffect(() => {
-    return () => {
-      if (logBufferRef.current.length > 0 && sessionId) {
-        const logsToSend = [...logBufferRef.current]
-        logBufferRef.current = []
-        
-        fetch('/api/tracking/behavior-features', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true, // Ensure it sends even if page closes
-          body: JSON.stringify({
-            sessionId,
-            logs: logsToSend
-          })
-        }).catch(err => console.error('Final sync failed:', err))
-      }
-    }
-  }, [sessionId])
-
-  return null // This is a logic-only component
+if (content.includes(oldLogic)) {
+  content = content.replace(oldLogic, newLogic);
+  fs.writeFileSync(path, content);
+  console.log("Patched BehaviorFeatureSync.tsx successfully");
+} else {
+  console.log("Could not find the old code block in BehaviorFeatureSync.tsx");
 }
