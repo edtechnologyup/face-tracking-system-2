@@ -24,8 +24,8 @@ const faceapi: typeof faceApiImport =
 let isModelLoaded = false;
 let isLoading = false;
 
-// URL ของโมเดลจาก CDN (หลายแหล่งเพื่อป้องกัน CDN ขัดข้อง)
-const PRIMARY_MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
+// URL ของโมเดลถูกโหลดจากเซิร์ฟเวอร์โดยตรง (Local /models) เพื่อให้เปิดกล้องได้ทันที
+const PRIMARY_MODEL_URL = "/models";
 const FALLBACK_MODEL_URL = "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
 const UNPKG_MODEL_URL = "https://unpkg.com/@vladmandic/face-api@1.7.12/model";
 
@@ -52,10 +52,10 @@ export async function loadFaceApiModels() {
   }
 
   isLoading = true;
-  console.log("กำลังโหลดโมเดล face-api (จาก jsDelivr CDN)...");
+  console.log("กำลังโหลดโมเดล face-api (จาก Local Server)...");
 
   try {
-    // ลองโหลดจาก jsDelivr CDN
+    // โหลดแบบ Local
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(PRIMARY_MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(PRIMARY_MODEL_URL),
@@ -64,10 +64,10 @@ export async function loadFaceApiModels() {
 
     isModelLoaded = true;
     isLoading = false;
-    console.log("โหลดโมเดล face-api สำเร็จจาก jsDelivr CDN");
+    console.log("โหลดโมเดล face-api สำเร็จจาก Local Server อย่างรวดเร็ว 🚀");
     return;
   } catch (error) {
-    console.warn("ไม่สามารถโหลดโมเดลจาก jsDelivr CDN ได้ กำลังลองโหลดจาก GitHub Raw...", error);
+    console.warn("ไม่สามารถโหลดโมเดลจาก Local ได้ กำลังลองโหลดจาก GitHub Raw...", error);
   }
 
   try {

@@ -369,12 +369,14 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
   // เริ่มการติดตามด้วย Hybrid Dual-Loop Architecture
   const startTracking = useCallback(async () => {
+    setIsLoading(true)
     try {
       let sessionId = sessionIdRef.current
       if (!sessionId) {
         sessionId = await createTrackingSession()
         if (!sessionId) {
           alert('ไม่สามารถสร้าง tracking session ได้\nกรุณาตรวจสอบการเข้าสู่ระบบ')
+          setIsLoading(false)
           return
         }
       }
@@ -382,12 +384,17 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       const cameraInitialized = await initializeCamera(videoRef)
       if (!cameraInitialized) {
         alert('ไม่สามารถเข้าถึงกล้องได้ กรุณาตรวจสอบการอนุญาต')
+        setIsLoading(false)
         return
       }
+
+      // Allow UI to render Loading Spinner before blocking thread with WebAssembly
+      await new Promise(r => setTimeout(r, 150))
 
       const ok = await initializeHybridDetectors()
       if (!ok) {
         alert('ไม่สามารถเริ่มต้น AI Hybrid Detectors ได้')
+        setIsLoading(false)
         return
       }
 
@@ -399,6 +406,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     } catch (error) {
       console.error('❌ เกิดข้อผิดพลาดในการเริ่มต้น:', error)
       alert('สถาปัตยกรรม Hybrid ไม่สามารถเริ่มต้นได้\nกรุณาลองใหม่อีกครั้ง')
+    } finally {
+      setIsLoading(false)
     }
   }, [createTrackingSession, initializeCamera, initializeHybridDetectors, startHybridTracking, startRecording])
 
