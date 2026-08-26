@@ -70,6 +70,7 @@ model TrackingSession {
   yolov8Logs    Yolov8Log[]
   dlibLogs      DlibLog[]
   openFaceLogs  OpenFaceLog[]
+  behaviorFeatureLogs BehaviorFeatureLog[]
 
   @@map("tracking_sessions")
 }
@@ -143,7 +144,7 @@ model MediaPipeLog {
 
   session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@map("mediapipe_logs")
+  @@map("model_mediapipe_logs")
   @@index([sessionId])
   @@index([timestamp])
 }
@@ -162,7 +163,7 @@ model Yolov8Log {
 
   session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@map("yolov8_logs")
+  @@map("model_yolov8_logs")
   @@index([sessionId])
   @@index([timestamp])
 }
@@ -181,7 +182,7 @@ model DlibLog {
 
   session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@map("dlib_logs")
+  @@map("model_dlib_logs")
   @@index([sessionId])
   @@index([timestamp])
 }
@@ -200,8 +201,90 @@ model OpenFaceLog {
 
   session        TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@map("openface_logs")
+  @@map("model_openface_logs")
   @@index([sessionId])
   @@index([timestamp])
 }
         
+// ==========================================
+// DETAILED BEHAVIOR FEATURE LOG (RAW DATA)
+// ==========================================
+model BehaviorFeatureLog {
+  id                   String   @id @default(cuid())
+  sessionId            String
+  participantCode      String?
+  timestamp            DateTime @default(now())
+  elapsedMs            Int
+  sampleIndex          Int
+  phase                String?
+  scenario             String?
+
+  // FACE
+  faceDetected         Boolean
+  faceCount            Int?
+  faceConfidence       Float?
+  bboxX                Float?
+  bboxY                Float?
+  bboxWidth            Float?
+  bboxHeight           Float?
+  faceCenterX          Float?
+  faceCenterY          Float?
+  faceDistanceCm       Float?
+
+  // HEAD
+  headYaw              Float?
+  headPitch            Float?
+  headRoll             Float?
+  headPoseConfidence   Float?
+
+  // GAZE
+  gazeYaw              Float?
+  gazePitch            Float?
+  gazeConfidence       Float?
+  gazeLeftX            Float?
+  gazeLeftY            Float?
+  gazeLeftZ            Float?
+  gazeRightX           Float?
+  gazeRightY           Float?
+  gazeRightZ           Float?
+
+  // EYE
+  leftEAR              Float?
+  rightEAR             Float?
+  leftEyeOpenness      Float?
+  rightEyeOpenness     Float?
+
+  // FACIAL
+  landmarkCount        Int?
+  landmarkConfidence   Float?
+  actionUnitsJson      Json?
+
+  // MODEL CONFIDENCE
+  yoloConfidence       Float?
+  mediapipeConfidence  Float?
+  dlibConfidence       Float?
+  openfaceConfidence   Float?
+
+  // QUALITY
+  brightnessMean       Float?
+  contrastScore        Float?
+  blurScore            Float?
+  occlusionScore       Float?
+
+  // DEVICE
+  cameraWidth          Int?
+  cameraHeight         Int?
+  cameraFps            Int?
+
+  // VALIDITY & REPRODUCIBILITY
+  isValid              Boolean
+  invalidReason        String?
+  pipelineVersion      String?
+  featureSchemaVersion String?
+
+  session              TrackingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("behavior_feature_logs")
+  @@index([sessionId])
+  @@index([timestamp])
+}

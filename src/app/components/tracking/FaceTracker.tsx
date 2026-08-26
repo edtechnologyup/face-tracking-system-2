@@ -6,6 +6,7 @@ import { OverlayCanvas } from './OverlayCanvas'
 import { DetectionStats } from './DetectionStats'
 import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
+import { BehaviorFeatureSync } from "./BehaviorFeatureSync"
 import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
 import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
 import toast from 'react-hot-toast'
@@ -711,6 +712,14 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
   return (
     <Card className="w-full h-full">
+      <BehaviorFeatureSync 
+        isActive={isActive}
+        sessionId={currentSessionId}
+        mediaPipeData={mediaPipeData}
+        yoloData={yoloMultiFaceData}
+        dlibData={dlibData}
+        openFaceData={openFaceData}
+      />
       <div className="p-6">
         {/* Video and Canvas Container with Live Face Count HUD Badge */}
         <div className="relative mb-6 rounded-2xl overflow-hidden shadow-lg border border-gray-200">
