@@ -161,17 +161,7 @@ export async function POST(request: NextRequest) {
       console.log(`🚨 ตรวจพบ Security Violations: ${securityViolationLogsCount} รายการ`)
     }
 
-    // 4. เพิ่ม Live Benchmark Matrix Metrics Event (4 Models)
-    if (benchmarkMetrics) {
-      const bm = benchmarkMetrics as Record<string, { confidence?: number }>
-      logsData.push({
-        sessionId: sessionId,
-        detectionType: 'BENCHMARK_METRICS',
-        detectionData: benchmarkMetrics as unknown as Prisma.InputJsonObject,
-        confidence: bm.mediapipe?.confidence || 0.98
-      })
-      console.log(`⚡ บันทึกข้อมูล Live Benchmark Metrics (4 Models) ลงฐานข้อมูล`)
-    }
+    // (นำการบันทึก BENCHMARK_METRICS ลง tracking_log ออกตามความต้องการ เพื่อลดความซ้ำซ้อน)
 
     // 5. ทำการบันทึกข้อมูลอย่างถูกต้อง (ลบ log เก่าของ session เพื่อกันข้อมูลซ้ำจากการ auto-sync แล้วลง log ชุดใหม่ล่าสุด)
     let logsCreated = 0

@@ -31,6 +31,10 @@ interface SessionDetail {
     }
   }
   logs: TrackingLog[]
+  mediapipeLogs?: Array<Record<string, unknown>>
+  yolov8Logs?: Array<Record<string, unknown>>
+  dlibLogs?: Array<Record<string, unknown>>
+  openFaceLogs?: Array<Record<string, unknown>>
   stats: {
     totalLogs: number
     faceOrientationCount: number
@@ -359,14 +363,17 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
 
       {/* Live Benchmark Matrix Card (If Recorded in DB) */}
       {(() => {
-        const benchmarkLog = sessionDetail.logs.find(log => log.detectionType === 'BENCHMARK_METRICS')
-        const metrics = benchmarkLog?.detectionData as Record<string, unknown> | undefined
-        if (!metrics) return null
+        const mpLog = sessionDetail.mediapipeLogs?.[sessionDetail.mediapipeLogs.length - 1] as Record<string, unknown> | undefined
+        const yoloLog = sessionDetail.yolov8Logs?.[sessionDetail.yolov8Logs.length - 1] as Record<string, unknown> | undefined
+        const dlibLog = sessionDetail.dlibLogs?.[sessionDetail.dlibLogs.length - 1] as Record<string, unknown> | undefined
+        const ofLog = sessionDetail.openFaceLogs?.[sessionDetail.openFaceLogs.length - 1] as Record<string, unknown> | undefined
 
-        const mp = metrics.mediapipe as Record<string, unknown> | undefined
-        const yolo = metrics.yolov8 as Record<string, unknown> | undefined
-        const dlib = metrics.dlib as Record<string, unknown> | undefined
-        const openface = metrics.openface as Record<string, unknown> | undefined
+        if (!mpLog && !yoloLog && !dlibLog && !ofLog) return null
+
+        const mp = mpLog
+        const yolo = yoloLog
+        const dlib = dlibLog
+        const openface = ofLog
 
         return (
           <Card className="p-6 bg-white border border-indigo-200 shadow-sm">

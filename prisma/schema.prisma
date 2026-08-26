@@ -97,7 +97,6 @@ enum DetectionType {
   FACE_ORIENTATION
   FACE_DETECTION_LOSS
   SECURITY_VIOLATION
-  BENCHMARK_METRICS
 }
 
 model SessionStatistics {
