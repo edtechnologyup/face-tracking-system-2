@@ -177,7 +177,12 @@ export async function POST(request: NextRequest) {
     let logsCreated = 0
 
     await prisma.trackingLog.deleteMany({
-      where: { sessionId: sessionId }
+      where: { 
+        sessionId: sessionId,
+        detectionType: {
+          in: ['FACE_ORIENTATION', 'FACE_DETECTION_LOSS', 'SECURITY_VIOLATION']
+        }
+      }
     })
 
     if (logsData.length > 0) {

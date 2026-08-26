@@ -497,7 +497,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     console.log('🚨 สถิติ Face Detection Loss:', faceDetectionLossStats)
     
     // บันทึกข้อมูลลง database
-    if (currentSessionId && events && stats) {
+    if (currentSessionId && stats) {
       setIsLoading(true)
       const faceDetectionLossEvents = getFaceDetectionLossEvents()
       const saveResult = await saveOrientationData(currentSessionId, events, stats, faceDetectionLossStats, faceDetectionLossEvents)
@@ -670,7 +670,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           const faceLossStats = getFaceDetectionLossStats()
           const faceLossEvents = getFaceDetectionLossEvents()
 
-          if (stats && events.length > 0) {
+          if (stats) {
             saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true)
               .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
               .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
