@@ -32,6 +32,7 @@ interface AnalyticsResult {
 export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ' }: FaceTrackerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null)
   
   // State สำหรับ session management
   const sessionIdRef = useRef<string | null>(null)
@@ -213,9 +214,13 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     if (!video || video.readyState < 2) return
 
     try {
-      const offscreenCanvas = document.createElement('canvas')
-      offscreenCanvas.width = 320
-      offscreenCanvas.height = 240
+      if (!offscreenCanvasRef.current) {
+        offscreenCanvasRef.current = document.createElement('canvas')
+        offscreenCanvasRef.current.width = 320
+        offscreenCanvasRef.current.height = 240
+      }
+
+      const offscreenCanvas = offscreenCanvasRef.current
       const ctx = offscreenCanvas.getContext('2d')
       if (!ctx) return
 

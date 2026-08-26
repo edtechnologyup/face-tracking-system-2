@@ -125,10 +125,10 @@ export async function detectFaceAndGetDescriptor(
 
     console.log("กำลังตรวจจับใบหน้า...");
 
-    // ตั้งค่าการตรวจจับใบหน้า (ใช้ inputSize 320 และ scoreThreshold 0.20 เพื่อตรวจจับได้รวดเร็วและแม่นยำทุกแสง)
+    // ตั้งค่าการตรวจจับใบหน้า (ใช้ inputSize 416 และ scoreThreshold 0.15 เพื่อตรวจจับได้ง่าย รวดเร็ว และแม่นยำทุกสภาพแสง)
     const detectionOptions = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 320,
-      scoreThreshold: 0.20
+      inputSize: 416,
+      scoreThreshold: 0.15
     });
 
     // ตรวจจับใบหน้าพร้อมจุดสำคัญและลายเซ็นใบหน้า
@@ -142,7 +142,7 @@ export async function detectFaceAndGetDescriptor(
     }
 
     // ตรวจสอบความมั่นใจในการตรวจจับ (ถ้าไม่ได้ระบุให้ข้าม)
-    if (!skipValidation && detection.detection.score < 0.20) {
+    if (!skipValidation && detection.detection.score < 0.15) {
       throw new Error("คุณภาพการตรวจจับใบหน้าไม่เพียงพอ กรุณาปรับแสงและตำแหน่ง");
     }
 
@@ -182,8 +182,8 @@ export async function detectFacePose(
     }
 
     const detectionOptions = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 320,
-      scoreThreshold: 0.20
+      inputSize: 416,
+      scoreThreshold: 0.15
     });
 
     const detection = await faceapi
@@ -262,11 +262,12 @@ function analyzeFacePose(landmarks: faceApiImport.FaceLandmarks68): {
   
   let pose: 'front' | 'left' | 'right' | 'unknown' = 'unknown';
   
-  if (Math.abs(yaw) < 12) {
+  // ปรับเกณฑ์ yaw ให้ยืดหยุ่น ตรวจจับหันหน้าได้ง่ายและเป็นธรรมชาติมากขึ้น (8 องศาขึ้นไป)
+  if (Math.abs(yaw) < 8) {
     pose = 'front';
-  } else if (yaw >= 12) {
+  } else if (yaw >= 8) {
     pose = 'left';
-  } else if (yaw <= -12) {
+  } else if (yaw <= -8) {
     pose = 'right';
   }
   
@@ -324,8 +325,8 @@ function detectBlinking(landmarks: faceApiImport.FaceLandmarks68): boolean {
   const rightEAR = calculateEAR(rightEyePoints);
   const avgEAR = (leftEAR + rightEAR) / 2;
   
-  // เกณฑ์สำหรับการกระพริบ (ค่าต่ำแสดงว่าตาปิด)
-  const blinkThreshold = 0.28;
+  // เกณฑ์สำหรับการกระพริบ (ปรับเป็น 0.30 เพื่อจับการกระพริบตาปกติได้ง่ายและไม่ต้องกะพริบตาแรงเกินไป)
+  const blinkThreshold = 0.30;
   
   console.log('การตรวจจับการกระพริบ:', {
     leftEAR: leftEAR.toFixed(3),

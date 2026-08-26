@@ -8,11 +8,11 @@ import { PoseInstructions } from "./face-capture/PoseInstructions";
 import { CaptureStatus } from "./face-capture/CaptureStatus";
 
 interface FaceCaptureProps {
-  onCapture: (faceDescriptors: { front: number[], left: number[], right: number[], blink: number[] }) => void;
+  onCapture: (faceDescriptors: { front: number[], left: number[], right: number[], blink?: number[] }) => void;
   loading?: boolean;
 }
 
-type PoseType = 'front' | 'left' | 'right' | 'blink';
+type PoseType = 'front' | 'left' | 'right';
 
 interface PoseData {
   type: PoseType;
@@ -49,8 +49,7 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
   const poses: PoseData[] = [
     { type: 'front', title: 'หน้าตรง', instruction: 'มองตรงเข้ากล้อง', icon: '🧑' },
     { type: 'left', title: 'หันซ้าย', instruction: 'หันหน้าไปทางซ้าย 30 องศา', icon: '👈' },
-    { type: 'right', title: 'หันขวา', instruction: 'หันหน้าไปทางขวา 30 องศา', icon: '👉' },
-    { type: 'blink', title: 'กระพริบตา', instruction: 'กระพริบตา 2-3 ครั้ง', icon: '👁️' }
+    { type: 'right', title: 'หันขวา', instruction: 'หันหน้าไปทางขวา 30 องศา', icon: '👉' }
   ];
   
   const currentPose = poses[currentPoseIndex];
@@ -270,7 +269,7 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
           setIsAllPosesComplete(true);
           // เล่นเสียงเมื่อเสร็จสิ้นทั้งหมด
           playCompletionSound();
-          onCapture(newCapturedPoses as { front: number[], left: number[], right: number[], blink: number[] });
+          onCapture(newCapturedPoses as { front: number[], left: number[], right: number[], blink?: number[] });
         }
         setIsCapturingPose(false);
         setAutoCapturing(false);
@@ -294,16 +293,17 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
         const nextCount = poseStableCount + 1;
         setPoseStableCount(nextCount);
         
-        // ท่ากระพริบตาใช้เวลาสั้นกว่า (3 เฟรม ~300ms) ท่าอื่นใช้ (10 เฟรม ~1 วินาที)
-        const requiredCount = targetPose === 'blink' ? 3 : 10;
+        // ถือนิ่งเพียง 4 เฟรม (~400ms) สแกนติดผ่านง่ายและรวดเร็ว
+        const requiredCount = 4;
         setPoseProgress(Math.min(90, Math.round((nextCount / requiredCount) * 100)));
         
         if (nextCount >= requiredCount) {
           handleAutoCapture();
         }
       } else {
-        setPoseStableCount(0);
-        setPoseProgress(0);
+        // ผ่อนปรนโดยไม่รีเซ็ตเป็น 0 ทันที เพื่อป้องกันปัญหามือสั่นหรือกล้องกระตุกหลุดเฟรม
+        setPoseStableCount(prev => Math.max(0, prev - 1));
+        setPoseProgress(prev => Math.max(0, Math.round((Math.max(0, prev - 1) / 4) * 100)));
       }
     }
   }, [currentDetectedPose, poseConfidence, isBlinking, poseStableCount, autoCapturing, isCapturingPose, isAllPosesComplete, currentPose.type, handleAutoCapture]);
@@ -371,6 +371,20 @@ export function FaceCapture({ onCapture, loading = false }: FaceCaptureProps) {
         capturedPoses={capturedPoses}
         poseProgress={poseProgress}
       />
+
+      {!isAllPosesComplete && isStreaming && !isModelLoading && (
+        <div className="mb-4 text-center">
+          <button
+            type="button"
+            onClick={handleAutoCapture}
+            disabled={isCapturingPose || autoCapturing}
+            className="w-full py-2.5 px-4 bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-700 text-sm font-semibold rounded-lg border border-purple-200 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+          >
+            <span>📸</span>
+            <span>ถ่ายภาพท่านี้ทันที (หากแสกนไม่ติด)</span>
+          </button>
+        </div>
+      )}
 
       <PoseInstructions
         currentPose={currentPose}

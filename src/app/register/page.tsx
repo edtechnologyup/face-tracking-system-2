@@ -83,7 +83,7 @@ export default function RegisterPage() {
   }
 
   // ฟังก์ชันสำหรับจัดการการจับภาพใบหน้า
-  const handleFaceCapture = async (faceDescriptors: { front: number[], left: number[], right: number[], blink: number[] }) => {
+  const handleFaceCapture = async (faceDescriptors: { front: number[], left: number[], right: number[], blink?: number[] }) => {
     if (!userData) return
     
     setLoading(true)

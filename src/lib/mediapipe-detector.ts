@@ -817,6 +817,9 @@ export class MediaPipeDetector {
     };
     
     this.orientationHistory.push(completedEvent);
+    if (this.orientationHistory.length > 1000) {
+      this.orientationHistory = this.orientationHistory.slice(-1000);
+    }
     
     console.log(`✅ จบ ${completedEvent.direction} event: ${completedEvent.duration} วินาที (${completedEvent.startTime} - ${completedEvent.endTime}) | Avg Confidence: ${avgConfidence}`);
     console.log(`   Max Yaw: ${completedEvent.maxYaw?.toFixed(1)}°, Max Pitch: ${completedEvent.maxPitch?.toFixed(1)}°`);
@@ -963,6 +966,9 @@ export class MediaPipeDetector {
       this.currentFaceDetectionLossEvent.isActive = false;
       
       this.faceDetectionLossHistory.push({ ...this.currentFaceDetectionLossEvent });
+      if (this.faceDetectionLossHistory.length > 1000) {
+        this.faceDetectionLossHistory = this.faceDetectionLossHistory.slice(-1000);
+      }
       
       console.log(`✅ Face Detection Recovered! Loss Event สิ้นสุด`);
       console.log(`   ระยะเวลา loss: ${duration} วินาที`);
@@ -1036,6 +1042,13 @@ export class MediaPipeDetector {
 
   destroy(): void {
     if (this.faceLandmarker) {
+      try {
+        if (typeof this.faceLandmarker.close === 'function') {
+          this.faceLandmarker.close();
+        }
+      } catch (err) {
+        console.warn('WASM close warning:', err);
+      }
       this.faceLandmarker = null;
     }
     this.isInitialized = false;
@@ -1049,6 +1062,10 @@ export class MediaPipeDetector {
     this.neutralYawBaseline = 0;
     this.yawFilter.reset();
     this.pitchFilter.reset();
+    
+    // Reset histories to free memory
+    this.orientationHistory = [];
+    this.faceDetectionLossHistory = [];
     
     // Clear real-time callbacks
     this.clearRealtimeCallbacks();

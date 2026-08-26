@@ -1,5 +1,5 @@
 interface PoseData {
-  type: 'front' | 'left' | 'right' | 'blink';
+  type: 'front' | 'left' | 'right';
   title: string;
   instruction: string;
   icon: string;
