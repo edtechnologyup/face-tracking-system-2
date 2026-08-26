@@ -28,8 +28,9 @@ export async function POST(request: NextRequest) {
       timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
       elapsedMs: log.elapsedMs ?? 0,
       sampleIndex: log.sampleIndex ?? 0,
-      phase: log.phase ?? null,
       scenario: log.scenario ?? null,
+      
+      phase: Array.isArray(log.phase) ? log.phase : (log.phase ? [log.phase] : []),
       
       faceDetected: Boolean(log.faceDetected),
       faceCount: log.faceCount ?? null,

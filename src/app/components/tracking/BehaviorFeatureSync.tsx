@@ -36,6 +36,11 @@ export function BehaviorFeatureSync({
   // Throttle timer variables
 
 
+  const attentionStateRef = useRef({
+    direction: 'CENTER', // CENTER, LEFT, RIGHT, DOWN
+    startTime: Date.now()
+  });
+
   // Sample data at ~10Hz (every 100ms)
   useEffect(() => {
     if (!isActive || !sessionId) return
@@ -78,6 +83,57 @@ export function BehaviorFeatureSync({
     // Calculate Occlusion Score
     const currentOcclusionScore = mediaPipeData?.landmarks ? calculateOcclusionScore(mediaPipeData.landmarks) : (hasFace ? 0 : 1.0);
 
+    // --- Temporal Attention Logic ---
+    let currentDirection = 'CENTER';
+    const yaw = mediaPipeData?.orientation?.yaw || 0;
+    const pitch = mediaPipeData?.orientation?.pitch || 0;
+    
+    if (yaw < -15) currentDirection = 'LEFT';
+    else if (yaw > 15) currentDirection = 'RIGHT';
+    else if (pitch > 15) currentDirection = 'DOWN'; // Assuming positive pitch is looking down
+    
+    if (attentionStateRef.current.direction !== currentDirection) {
+      attentionStateRef.current = { direction: currentDirection, startTime: now };
+    }
+    
+    const durationLookingMs = now - attentionStateRef.current.startTime;
+
+    let computedScenario = 'CENTER_SCREEN';
+    if (!hasFace) {
+      computedScenario = 'FACE_MISSING';
+    } else if ((yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || 1) > 1) {
+      computedScenario = 'MULTIPLE_FACES';
+    } else if (currentOcclusionScore >= 0.8) {
+      computedScenario = 'OCCLUSION';
+    } else if (latestQualityRef.current.brightnessMean < 0.2) {
+      computedScenario = 'LOW_LIGHT';
+    } else if (mediaPipeData?.distance?.estimatedCm && mediaPipeData.distance.estimatedCm > 100) {
+      computedScenario = 'DISTANCE_1M';
+    } else {
+      if (currentDirection === 'LEFT') {
+        computedScenario = durationLookingMs > 2000 ? 'SUSTAINED_LOOK_AWAY_LEFT' : 'BRIEF_GLANCE_LEFT';
+      } else if (currentDirection === 'RIGHT') {
+        computedScenario = durationLookingMs > 2000 ? 'SUSTAINED_LOOK_AWAY_RIGHT' : 'BRIEF_GLANCE_RIGHT';
+      } else if (currentDirection === 'DOWN') {
+        computedScenario = 'LOOK_DOWN';
+      } else {
+        computedScenario = 'CENTER_SCREEN';
+      }
+    }
+
+    
+    // Calculate validity logic based on thresholds
+    const isFaceValid = hasFace && currentOcclusionScore < 0.5 && computedScenario !== 'MULTIPLE_FACES';
+    const isHeadValid = isFaceValid && mediaPipeData?.orientation?.yaw !== undefined;
+    const isGazeValid = isFaceValid && openFaceData?.gazeVector?.x !== undefined;
+    const isEyeValid = isFaceValid && mediaPipeData?.landmarks?.length > 400; // MediaPipe has 468 landmarks for face mesh which includes eye precision
+
+    const computedPhase = [];
+    if (isFaceValid) computedPhase.push('faceValid');
+    if (isHeadValid) computedPhase.push('headValid');
+    if (isGazeValid) computedPhase.push('gazeValid');
+    if (isEyeValid) computedPhase.push('eyeValid');
+
     
     // Build a log entry
     const logEntry: any = {
@@ -86,8 +142,8 @@ export function BehaviorFeatureSync({
       timestamp: new Date().toISOString(),
       elapsedMs: now - lastSyncTimeRef.current, // will adjust before sending
       sampleIndex: sampleIndexRef.current++,
-      phase: 'TRACKING',
-      scenario: 'HYBRID_MODE',
+      scenario: computedScenario,
+      phase: computedPhase,
       
       faceDetected: hasFace,
       faceCount: yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0),
