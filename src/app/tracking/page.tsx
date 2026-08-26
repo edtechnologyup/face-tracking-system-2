@@ -212,6 +212,7 @@ export default function TrackingPage() {
               <FaceTracker
                 onTrackingStop={handleStopTracking}
                 sessionName={trackingData.location}
+                participantCode={user.id}
               />
             )}
           </div>

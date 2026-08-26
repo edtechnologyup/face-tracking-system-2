@@ -14,6 +14,7 @@ import toast from 'react-hot-toast'
 interface FaceTrackerProps {
   onTrackingStop: () => void
   sessionName?: string
+  participantCode?: string
 }
 
 interface AnalyticsResult {
@@ -30,7 +31,7 @@ interface AnalyticsResult {
   }
 }
 
-export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ' }: FaceTrackerProps) {
+export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ', participantCode }: FaceTrackerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -724,6 +725,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       <BehaviorFeatureSync 
         isActive={isActive}
         sessionId={currentSessionId}
+        participantCode={participantCode}
         mediaPipeData={mediaPipeData}
         yoloData={yoloMultiFaceData}
         dlibData={dlibData}

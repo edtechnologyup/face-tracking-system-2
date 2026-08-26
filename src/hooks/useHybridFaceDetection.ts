@@ -48,6 +48,11 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
   } = config
 
   const [isActive, setIsActive] = useState(false)
+  const isActiveRef = useRef(false)
+
+  useEffect(() => {
+    isActiveRef.current = isActive
+  }, [isActive])
   const [isInitializing, setIsInitializing] = useState(false)
   const [mediaPipeData, setMediaPipeData] = useState<FaceTrackingData | null>(null)
   const [yoloMultiFaceData, setYoloMultiFaceData] = useState<YOLOv8MultiFaceResult | null>(null)
@@ -313,23 +318,29 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     if (!videoRef.current) return
     setIsActive(true)
 
-    if (primaryIntervalRef.current) clearInterval(primaryIntervalRef.current)
-    if (yoloIntervalRef.current) clearInterval(yoloIntervalRef.current)
+    if (primaryIntervalRef.current) clearTimeout(primaryIntervalRef.current)
+    if (yoloIntervalRef.current) clearTimeout(yoloIntervalRef.current)
     if (statsIntervalRef.current) clearInterval(statsIntervalRef.current)
 
     // A) High-frequency Primary Loop (MediaPipe + Dlib + OpenFace)
-    primaryIntervalRef.current = setInterval(() => {
+    const runPrimaryLoop = async () => {
+      if (!isActiveRef.current) return
       if (videoRef.current) {
-        performPrimaryDetection(videoRef.current)
+        await performPrimaryDetection(videoRef.current)
       }
-    }, primaryIntervalMs)
+      primaryIntervalRef.current = setTimeout(runPrimaryLoop, primaryIntervalMs)
+    }
+    runPrimaryLoop()
 
     // B) Low-frequency Background Loop (YOLOv8 Multi-face scan)
-    yoloIntervalRef.current = setInterval(() => {
+    const runYoloLoop = async () => {
+      if (!isActiveRef.current) return
       if (videoRef.current) {
-        performBackgroundYoloScan(videoRef.current)
+        await performBackgroundYoloScan(videoRef.current)
       }
-    }, yoloIntervalMs)
+      yoloIntervalRef.current = setTimeout(runYoloLoop, yoloIntervalMs)
+    }
+    runYoloLoop()
 
     // C) Live Real-Time Stats Update Loop (Every 250ms)
     statsIntervalRef.current = setInterval(() => {
@@ -347,11 +358,11 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     setIsActive(false)
 
     if (primaryIntervalRef.current) {
-      clearInterval(primaryIntervalRef.current)
+      clearTimeout(primaryIntervalRef.current)
       primaryIntervalRef.current = null
     }
     if (yoloIntervalRef.current) {
-      clearInterval(yoloIntervalRef.current)
+      clearTimeout(yoloIntervalRef.current)
       yoloIntervalRef.current = null
     }
     if (statsIntervalRef.current) {

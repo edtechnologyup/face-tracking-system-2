@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef } from 'react'
+import { analyzeImageQuality } from '@/lib/image-quality'
+import { calculateOcclusionScore } from '@/lib/occlusion-utils'
 
 export interface BehaviorFeatureSyncProps {
+  participantCode?: string;
   isActive: boolean
   sessionId: string | null
   mediaPipeData: any
@@ -16,12 +19,22 @@ export function BehaviorFeatureSync({
   mediaPipeData,
   yoloData,
   dlibData,
-  openFaceData
+  openFaceData,
+  participantCode
 }: BehaviorFeatureSyncProps) {
   const logBufferRef = useRef<any[]>([])
   const sampleIndexRef = useRef<number>(0)
   const lastSyncTimeRef = useRef<number>(Date.now())
   const lastSampleTimeRef = useRef<number>(Date.now())
+
+  const lastQualityCheckRef = useRef<number>(0);
+  const latestQualityRef = useRef({ brightnessMean: 0.5, contrastScore: 0.5, blurScore: 0 });
+  const frameCountRef = useRef<number>(0);
+  const fpsWindowStartRef = useRef<number>(Date.now());
+  const currentFpsRef = useRef<number>(30);
+  
+  // Throttle timer variables
+
 
   // Sample data at ~10Hz (every 100ms)
   useEffect(() => {
@@ -32,9 +45,44 @@ export function BehaviorFeatureSync({
     lastSampleTimeRef.current = now
 
     const hasFace = !!(mediaPipeData?.isDetected || yoloData?.isDetected)
+
+    // FPS Calculation (runs every cycle)
+    frameCountRef.current++;
+    if (now - fpsWindowStartRef.current >= 1000) {
+      currentFpsRef.current = frameCountRef.current;
+      frameCountRef.current = 0;
+      fpsWindowStartRef.current = now;
+    }
+
+    // Quality check (throttled to every 2 seconds for performance)
+    if (now - lastQualityCheckRef.current >= 2000) {
+      lastQualityCheckRef.current = now;
+      const videoEl = document.querySelector('video');
+      let bbox = null;
+      if (mediaPipeData?.landmarks && videoEl) {
+        // approximate bounding box from landmarks
+        const xs = mediaPipeData.landmarks.map((l: any) => l.x * videoEl.videoWidth);
+        const ys = mediaPipeData.landmarks.map((l: any) => l.y * videoEl.videoHeight);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      }
+      if (videoEl) {
+         // Using setTimeout to defer processing and not block the main React render cycle
+         setTimeout(() => {
+           latestQualityRef.current = analyzeImageQuality(videoEl, bbox);
+         }, 0);
+      }
+    }
+    
+    // Calculate Occlusion Score
+    const currentOcclusionScore = mediaPipeData?.landmarks ? calculateOcclusionScore(mediaPipeData.landmarks) : (hasFace ? 0 : 1.0);
+
     
     // Build a log entry
     const logEntry: any = {
+      participantCode: participantCode || null,
+      featureSchemaVersion: '1.0',
       timestamp: new Date().toISOString(),
       elapsedMs: now - lastSyncTimeRef.current, // will adjust before sending
       sampleIndex: sampleIndexRef.current++,
@@ -63,6 +111,12 @@ export function BehaviorFeatureSync({
       // Gaze (Estimated from head pose if explicit gaze not available)
       gazeYaw: mediaPipeData?.orientation?.yaw ? mediaPipeData.orientation.yaw * 1.2 : null,
       gazePitch: mediaPipeData?.orientation?.pitch ? mediaPipeData.orientation.pitch * 1.2 : null,
+      gazeLeftX: openFaceData?.gazeVector?.x || null,
+      gazeLeftY: openFaceData?.gazeVector?.y || null,
+      gazeLeftZ: openFaceData?.gazeVector?.z || null,
+      gazeRightX: openFaceData?.gazeVector?.x || null,
+      gazeRightY: openFaceData?.gazeVector?.y || null,
+      gazeRightZ: openFaceData?.gazeVector?.z || null,
       gazeConfidence: mediaPipeData?.confidence || null,
       
       // Eye & Action Units
@@ -70,7 +124,7 @@ export function BehaviorFeatureSync({
       rightEAR: null,
       leftEyeOpenness: null,
       rightEyeOpenness: null,
-      actionUnitsJson: null,
+      actionUnitsJson: openFaceData?.actionUnits || null,
       
       // Model Confidences
       yoloConfidence: yoloData?.confidence || null,
@@ -79,19 +133,19 @@ export function BehaviorFeatureSync({
       openfaceConfidence: openFaceData?.confidence || null,
       
       // Quality
-      brightnessMean: 0.5,
-      contrastScore: 0.5,
-      blurScore: 0,
-      occlusionScore: 0,
+      brightnessMean: latestQualityRef.current.brightnessMean,
+      contrastScore: latestQualityRef.current.contrastScore,
+      blurScore: latestQualityRef.current.blurScore,
+      occlusionScore: currentOcclusionScore,
       
       // Landmarks & Device
       landmarkCount: mediaPipeData?.landmarks ? mediaPipeData.landmarks.length : null,
       landmarkConfidence: mediaPipeData?.confidence || null,
       cameraWidth: null,
       cameraHeight: null,
-      cameraFps: 30,
-      isValid: hasFace,
-      invalidReason: hasFace ? null : 'NO_FACE_DETECTED',
+      cameraFps: currentFpsRef.current,
+      isValid: hasFace && (yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0)) <= 1 && currentOcclusionScore < 0.8,
+      invalidReason: !hasFace ? 'NO_FACE_DETECTED' : ((yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0)) > 1 ? 'MULTIPLE_FACES_DETECTED' : (currentOcclusionScore >= 0.8 ? 'FACE_OCCLUDED' : null)),
       pipelineVersion: 'hybrid-1.0'
     }
 
@@ -167,7 +221,7 @@ export function BehaviorFeatureSync({
         // If fail, we drop them to avoid memory leaks or retry logic if needed
       })
     }
-  }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData])
+  }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData, participantCode])
 
   // Sync on unmount or stop
   useEffect(() => {
