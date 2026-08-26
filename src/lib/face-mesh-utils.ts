@@ -70,20 +70,23 @@ export function calculateCoordinates(
   let offsetX = 0
   let offsetY = 0
   
-  if (video && video.videoWidth && video.videoHeight) {
+  if (video && video.videoWidth && video.videoHeight && canvasWidth > 0 && canvasHeight > 0) {
     const videoAspect = video.videoWidth / video.videoHeight
     const canvasAspect = canvasWidth / canvasHeight
     
-    if (videoAspect > canvasAspect) {
-      // Video กว้างกว่า canvas - มี letterbox บนล่าง
-      scaleX = canvasWidth
-      scaleY = canvasWidth / videoAspect
-      offsetY = (canvasHeight - scaleY) / 2
-    } else {
-      // Video สูงกว่า canvas - มี letterbox ซ้ายขวา
-      scaleX = canvasHeight * videoAspect
-      scaleY = canvasHeight
-      offsetX = (canvasWidth - scaleX) / 2
+    // หากความต่างของ aspect ratio เกิน threshold (0.01) จึงจะคำนวณ letterbox
+    if (Math.abs(videoAspect - canvasAspect) > 0.01) {
+      if (videoAspect > canvasAspect) {
+        // Video กว้างกว่า canvas - มี letterbox บนล่าง
+        scaleX = canvasWidth
+        scaleY = canvasWidth / videoAspect
+        offsetY = (canvasHeight - scaleY) / 2
+      } else {
+        // Video สูงกว่า canvas - มี letterbox ซ้ายขวา
+        scaleX = canvasHeight * videoAspect
+        scaleY = canvasHeight
+        offsetX = (canvasWidth - scaleX) / 2
+      }
     }
   }
   

@@ -7,24 +7,34 @@ interface OverlayCanvasProps {
 
 export const OverlayCanvas = forwardRef<HTMLCanvasElement, OverlayCanvasProps>(
   ({ videoRef }, ref) => {
-    // อัปเดตขนาด canvas เมื่อ video โหลดเสร็จ
+    // อัปเดตขนาด canvas ให้ตรงกับ video element เสมอ
     useEffect(() => {
       const video = videoRef.current
-      const canvas = ref as React.RefObject<HTMLCanvasElement>
+      const canvas = (ref as React.RefObject<HTMLCanvasElement | null>)?.current
       
-      if (video && canvas.current) {
+      if (video && canvas) {
         const updateCanvasSize = () => {
-          // ใช้ขนาดจริงของ video element
           const videoRect = video.getBoundingClientRect()
-          canvas.current!.width = video.offsetWidth || videoRect.width
-          canvas.current!.height = video.offsetHeight || videoRect.height
+          const vw = video.offsetWidth || videoRect.width
+          const vh = video.offsetHeight || videoRect.height
+          if (vw > 0 && vh > 0 && (canvas.width !== vw || canvas.height !== vh)) {
+            canvas.width = vw
+            canvas.height = vh
+          }
         }
         
         video.addEventListener('loadedmetadata', updateCanvasSize)
         video.addEventListener('resize', updateCanvasSize)
+        video.addEventListener('playing', updateCanvasSize)
+        window.addEventListener('resize', updateCanvasSize)
+
+        updateCanvasSize()
+
         return () => {
           video.removeEventListener('loadedmetadata', updateCanvasSize)
           video.removeEventListener('resize', updateCanvasSize)
+          video.removeEventListener('playing', updateCanvasSize)
+          window.removeEventListener('resize', updateCanvasSize)
         }
       }
     }, [videoRef, ref])

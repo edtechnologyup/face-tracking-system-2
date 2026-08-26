@@ -172,6 +172,25 @@ export default function ArcFaceTestPage() {
     )
   }, [registeredPoses, mediaPipeData])
 
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const updateAspect = () => {
+      if (video.videoWidth && video.videoHeight) {
+        setAspectRatio(video.videoWidth / video.videoHeight)
+      }
+    }
+    video.addEventListener('loadedmetadata', updateAspect)
+    video.addEventListener('resize', updateAspect)
+    if (video.videoWidth && video.videoHeight) updateAspect()
+    return () => {
+      video.removeEventListener('loadedmetadata', updateAspect)
+      video.removeEventListener('resize', updateAspect)
+    }
+  }, [isCameraActive])
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-4 md:p-8">
       {/* Header */}
@@ -203,7 +222,10 @@ export default function ArcFaceTestPage() {
         {/* Left 2 Cols: Camera & ArcFace Controls */}
         <div className="lg:col-span-2 space-y-4">
           <Card className="bg-slate-800/80 border-slate-700 p-4">
-            <div className="relative aspect-video rounded-lg overflow-hidden bg-black flex items-center justify-center border border-slate-700 mb-4">
+            <div 
+              className="relative rounded-lg overflow-hidden bg-black flex items-center justify-center border border-slate-700 mb-4 max-h-[60vh] transition-all duration-300"
+              style={{ aspectRatio: aspectRatio ? `${aspectRatio}` : '16/9' }}
+            >
               <video
                 ref={videoRef}
                 className="absolute inset-0 w-full h-full object-cover transform -scale-x-100"

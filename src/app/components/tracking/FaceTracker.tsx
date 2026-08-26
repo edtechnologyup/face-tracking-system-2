@@ -89,6 +89,27 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     const vw = canvas.width
     const vh = canvas.height
 
+    // คำนวณ scaling coordinates รองรับทั้ง mobile portrait และ desktop landscape
+    const { scaleX, scaleY, offsetX, offsetY } = (video.videoWidth && video.videoHeight)
+      ? {
+          scaleX: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01
+            ? (video.videoWidth / video.videoHeight > vw / vh ? vw : vh * (video.videoWidth / video.videoHeight))
+            : vw,
+          scaleY: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01
+            ? (video.videoWidth / video.videoHeight > vw / vh ? vw / (video.videoWidth / video.videoHeight) : vh)
+            : vh,
+          offsetX: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01 && (video.videoWidth / video.videoHeight <= vw / vh)
+            ? (vw - vh * (video.videoWidth / video.videoHeight)) / 2
+            : 0,
+          offsetY: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01 && (video.videoWidth / video.videoHeight > vw / vh)
+            ? (vh - vw / (video.videoWidth / video.videoHeight)) / 2
+            : 0
+        }
+      : { scaleX: vw, scaleY: vh, offsetX: 0, offsetY: 0 }
+
+    const videoWidth = video.videoWidth || 640
+    const videoHeight = video.videoHeight || 480
+
     // 1. Draw MediaPipe 468-point Sci-Fi Mesh (🟢 Green)
     if (mediaPipeData && mediaPipeData.isDetected && mediaPipeData.landmarks) {
       drawSciFiFaceMesh(ctx, mediaPipeData.landmarks, video, vw, vh, mediaPipeData.orientation.isLookingAway)
@@ -98,10 +119,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     if (yoloMultiFaceData) {
       if (yoloMultiFaceData.primaryBox) {
         const b = yoloMultiFaceData.primaryBox
-        const bx = (b.x / (video.videoWidth || 640)) * vw
-        const by = (b.y / (video.videoHeight || 480)) * vh
-        const bw = (b.width / (video.videoWidth || 640)) * vw
-        const bh = (b.height / (video.videoHeight || 480)) * vh
+        const bx = (b.x / videoWidth) * scaleX + offsetX
+        const by = (b.y / videoHeight) * scaleY + offsetY
+        const bw = (b.width / videoWidth) * scaleX
+        const bh = (b.height / videoHeight) * scaleY
 
         ctx.strokeStyle = '#3B82F6'
         ctx.lineWidth = 2.5
@@ -120,8 +141,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         if (yoloMultiFaceData.keypoints) {
           ctx.fillStyle = '#EF4444'
           yoloMultiFaceData.keypoints.forEach(kp => {
-            const kpx = (kp.x / (video.videoWidth || 640)) * vw
-            const kpy = (kp.y / (video.videoHeight || 480)) * vh
+            const kpx = (kp.x / videoWidth) * scaleX + offsetX
+            const kpy = (kp.y / videoHeight) * scaleY + offsetY
             ctx.beginPath()
             ctx.arc(kpx, kpy, 4, 0, 2 * Math.PI)
             ctx.fill()
@@ -133,10 +154,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       if (yoloMultiFaceData.boxes) {
         yoloMultiFaceData.boxes.forEach((box) => {
           if (!box.isPrimary) {
-            const vx = (box.x / (video.videoWidth || 640)) * vw
-            const vy = (box.y / (video.videoHeight || 480)) * vh
-            const vbw = (box.width / (video.videoWidth || 640)) * vw
-            const vbh = (box.height / (video.videoHeight || 480)) * vh
+            const vx = (box.x / videoWidth) * scaleX + offsetX
+            const vy = (box.y / videoHeight) * scaleY + offsetY
+            const vbw = (box.width / videoWidth) * scaleX
+            const vbh = (box.height / videoHeight) * scaleY
 
             ctx.strokeStyle = '#EF4444'
             ctx.lineWidth = 3
@@ -154,8 +175,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     if (dlibData && dlibData.isDetected && dlibData.landmarks68) {
       ctx.fillStyle = '#F59E0B'
       dlibData.landmarks68.forEach(pt => {
-        const px = (pt.x / (video.videoWidth || 640)) * vw
-        const py = (pt.y / (video.videoHeight || 480)) * vh
+        const px = (pt.x / videoWidth) * scaleX + offsetX
+        const py = (pt.y / videoHeight) * scaleY + offsetY
         ctx.beginPath()
         ctx.arc(px, py, 2.5, 0, 2 * Math.PI)
         ctx.fill()
@@ -165,8 +186,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     // 4. Draw OpenFace 3D Gaze Vector & Action Units Target (🟣 Purple Line & Circle)
     if (openFaceData && openFaceData.isDetected) {
       const fc = openFaceData.faceCenter ? {
-        x: (openFaceData.faceCenter.x / (video.videoWidth || 640)) * vw,
-        y: (openFaceData.faceCenter.y / (video.videoHeight || 480)) * vh
+        x: (openFaceData.faceCenter.x / videoWidth) * scaleX + offsetX,
+        y: (openFaceData.faceCenter.y / videoHeight) * scaleY + offsetY
       } : { x: vw / 2, y: vh / 2 }
       const gaze = openFaceData.gazeVector
 

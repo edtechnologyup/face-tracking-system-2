@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, useState, useEffect } from 'react';
 import { FaceDetectionOverlay } from './FaceDetectionOverlay';
 import { StatusIndicators } from './StatusIndicators';
 
@@ -26,10 +26,37 @@ export const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
     capturedPoses,
     poseProgress
   }, ref) {
+    const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+
+    useEffect(() => {
+      const videoEl = typeof ref === 'function' ? null : ref?.current;
+      if (!videoEl) return;
+
+      const updateAspect = () => {
+        if (videoEl.videoWidth && videoEl.videoHeight) {
+          setAspectRatio(videoEl.videoWidth / videoEl.videoHeight);
+        }
+      };
+
+      videoEl.addEventListener('loadedmetadata', updateAspect);
+      videoEl.addEventListener('resize', updateAspect);
+      if (videoEl.videoWidth && videoEl.videoHeight) {
+        updateAspect();
+      }
+
+      return () => {
+        videoEl.removeEventListener('loadedmetadata', updateAspect);
+        videoEl.removeEventListener('resize', updateAspect);
+      };
+    }, [ref, isStreaming]);
+
     return (
-      <div className="relative mb-6">
+      <div className="relative mb-6 flex justify-center">
         {/* Video Preview */}
-        <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
+        <div 
+          className="relative bg-gray-900 rounded-lg overflow-hidden w-full max-h-[60vh] transition-all duration-300 flex items-center justify-center"
+          style={{ aspectRatio: aspectRatio ? `${aspectRatio}` : '16/9' }}
+        >
           <video
             ref={ref}
             className="w-full h-full object-cover"
@@ -69,7 +96,6 @@ export const VideoPreview = forwardRef<HTMLVideoElement, VideoPreviewProps>(
             </div>
           )}
         </div>
-
       </div>
     );
   }

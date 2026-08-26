@@ -15,7 +15,7 @@ export function EngineComparison() {
 
   const [isRunning, setIsRunning] = useState(false)
   const { initializeCamera, stopCamera } = useCamera()
-  const { isInitializing, isActive, results, initializeEngines, processFrame, stopEngines } = useMultiEngineDetection()
+  const { isActive, results, initializeEngines, processFrame, stopEngines } = useMultiEngineDetection()
 
   // Main 60 FPS Single Canvas Draw Loop (Zero Flickering)
   const requestRef = useRef<number | null>(null)
@@ -178,6 +178,25 @@ export function EngineComparison() {
     toast('หยุดการเปรียบเทียบแล้ว')
   }
 
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const updateAspect = () => {
+      if (video.videoWidth && video.videoHeight) {
+        setAspectRatio(video.videoWidth / video.videoHeight)
+      }
+    }
+    video.addEventListener('loadedmetadata', updateAspect)
+    video.addEventListener('resize', updateAspect)
+    if (video.videoWidth && video.videoHeight) updateAspect()
+    return () => {
+      video.removeEventListener('loadedmetadata', updateAspect)
+      video.removeEventListener('resize', updateAspect)
+    }
+  }, [isRunning])
+
   useEffect(() => {
     if (isRunning && isActive) {
       requestRef.current = requestAnimationFrame(animate)
@@ -191,28 +210,34 @@ export function EngineComparison() {
 
   return (
     <div className="space-y-6">
-      {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <span>⚡ ระบบทดสอบเปรียบเทียบ 4 เครื่องมือตรวจจับใบหน้า</span>
-          </h2>
-          <p className="text-sm text-gray-500 mt-1">
-            MediaPipe vs YOLOv8-Face vs Dlib (68-Point) vs OpenFace (Real-Time Benchmark)
-          </p>
+      {/* Control Panel Card */}
+      <Card className="p-6 bg-gradient-to-r from-gray-900 via-slate-800 to-gray-900 text-white shadow-xl">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <span>🔬 Multi-Engine Real-Time Face Detection Benchmark</span>
+              <span className="text-xs bg-purple-500/30 text-purple-300 border border-purple-400/30 px-2 py-0.5 rounded-full font-normal">
+                Phase 1 Benchmark
+              </span>
+            </h2>
+            <p className="text-sm text-gray-300 mt-1">
+              เปรียบเทียบประสิทธิภาพการประมวลผล real-time 4 เครื่องมือ (MediaPipe, YOLOv8-Face, Dlib, OpenFace)
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            {!isRunning ? (
+              <Button onClick={startComparison} className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-lg shadow-green-500/20">
+                🚀 เริ่มทดสอบเปรียบเทียบ 4 เครื่องมือ
+              </Button>
+            ) : (
+              <Button onClick={stopComparison} className="bg-red-600 hover:bg-red-700 text-white font-medium px-6 py-2.5 rounded-xl transition-all shadow-md">
+                ⏹️ หยุดการเปรียบเทียบ
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="flex gap-3">
-          {!isRunning ? (
-            <Button onClick={startComparison} disabled={isInitializing} className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-xl transition-all shadow-md">
-              {isInitializing ? '⏳ กำลังเริ่มต้น...' : '🚀 เริ่มต้นเปรียบเทียบเรียลไทม์'}
-            </Button>
-          ) : (
-            <Button onClick={stopComparison} className="bg-red-600 hover:bg-red-700 text-white font-medium px-6 py-2.5 rounded-xl transition-all shadow-md">
-              ⏹️ หยุดการเปรียบเทียบ
-            </Button>
-          )}
-        </div>
-      </div>
+      </Card>
 
       {/* Hidden Master Video Element (Zero Flickering Source) */}
       <video ref={videoRef} className="hidden" playsInline muted autoPlay />
@@ -235,7 +260,10 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+          <div 
+            className="relative bg-black rounded-xl overflow-hidden shadow-inner max-h-[50vh] transition-all duration-300 flex items-center justify-center"
+            style={{ aspectRatio: aspectRatio ? `${aspectRatio}` : '16/9' }}
+          >
             <canvas ref={canvasMpRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">
@@ -260,7 +288,10 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+          <div 
+            className="relative bg-black rounded-xl overflow-hidden shadow-inner max-h-[50vh] transition-all duration-300 flex items-center justify-center"
+            style={{ aspectRatio: aspectRatio ? `${aspectRatio}` : '16/9' }}
+          >
             <canvas ref={canvasYoloRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">
@@ -285,7 +316,10 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+          <div 
+            className="relative bg-black rounded-xl overflow-hidden shadow-inner max-h-[50vh] transition-all duration-300 flex items-center justify-center"
+            style={{ aspectRatio: aspectRatio ? `${aspectRatio}` : '16/9' }}
+          >
             <canvas ref={canvasDlibRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">
@@ -310,7 +344,10 @@ export function EngineComparison() {
               </span>
             </div>
           </div>
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-inner">
+          <div 
+            className="relative bg-black rounded-xl overflow-hidden shadow-inner max-h-[50vh] transition-all duration-300 flex items-center justify-center"
+            style={{ aspectRatio: aspectRatio ? `${aspectRatio}` : '16/9' }}
+          >
             <canvas ref={canvasOpenfaceRef} className="w-full h-full object-cover" />
           </div>
           <div className="mt-3 text-xs text-gray-500 flex justify-between">

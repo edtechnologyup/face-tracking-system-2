@@ -23,8 +23,8 @@ export function FaceDetectionOverlay({
   const isCorrectPose = currentDetectedPose === currentPoseType || (currentPoseType === 'blink' && isBlinking);
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center">
-      <div className={`border-2 rounded-full w-48 h-54 transition-all duration-300 ${
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div className={`border-2 rounded-full w-40 h-52 sm:w-48 sm:h-60 max-w-[70%] max-h-[70%] transition-all duration-300 ${
         isCorrectPose
           ? 'border-green-400 shadow-lg shadow-green-400/50'
           : poseStableCount > 5
