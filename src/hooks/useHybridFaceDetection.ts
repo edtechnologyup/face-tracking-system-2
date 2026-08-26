@@ -317,6 +317,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
   const startHybridTracking = useCallback((videoRef: React.RefObject<HTMLVideoElement | null>) => {
     if (!videoRef.current) return
     setIsActive(true)
+    isActiveRef.current = true
 
     if (primaryIntervalRef.current) clearTimeout(primaryIntervalRef.current)
     if (yoloIntervalRef.current) clearTimeout(yoloIntervalRef.current)
@@ -356,6 +357,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
   // Stop Tracking & Cleanup Resources
   const stopHybridTracking = useCallback(() => {
     setIsActive(false)
+    isActiveRef.current = false
 
     if (primaryIntervalRef.current) {
       clearTimeout(primaryIntervalRef.current)
