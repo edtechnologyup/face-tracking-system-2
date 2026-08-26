@@ -175,97 +175,98 @@ export async function POST(request: NextRequest) {
 
     // 5. ทำการบันทึกข้อมูลอย่างถูกต้อง (ลบ log เก่าของ session เพื่อกันข้อมูลซ้ำจากการ auto-sync แล้วลง log ชุดใหม่ล่าสุด)
     let logsCreated = 0
-    await prisma.$transaction(async (tx) => {
-      await tx.trackingLog.deleteMany({
-        where: { sessionId: sessionId }
-      })
 
-      if (logsData.length > 0) {
-        const batchResult = await tx.trackingLog.createMany({
-          data: logsData
-        })
-        logsCreated = batchResult.count
-      }
-
-      // บันทึกลงตารางโมเดลแยกแต่ละตัว (MediaPipe, YOLOv8, Dlib, OpenFace)
-      if (benchmarkMetrics) {
-        const bm = benchmarkMetrics as Record<string, {
-          fps?: number
-          latencyMs?: number
-          landmarksCount?: number
-          memoryMb?: number
-          cpuLoadPct?: number
-          confidence?: number
-          isDetected?: boolean
-        }>
-
-        // ลบข้อมูล log เก่าของโมเดลแยกใน session นี้ก่อนบันทึกใหม่
-        await tx.mediaPipeLog.deleteMany({ where: { sessionId } })
-        await tx.yolov8Log.deleteMany({ where: { sessionId } })
-        await tx.dlibLog.deleteMany({ where: { sessionId } })
-        await tx.openFaceLog.deleteMany({ where: { sessionId } })
-
-        if (bm.mediapipe) {
-          await tx.mediaPipeLog.create({
-            data: {
-              sessionId,
-              fps: bm.mediapipe.fps,
-              latencyMs: bm.mediapipe.latencyMs,
-              landmarksCount: bm.mediapipe.landmarksCount ?? 468,
-              memoryMb: bm.mediapipe.memoryMb,
-              cpuLoadPct: bm.mediapipe.cpuLoadPct,
-              confidence: bm.mediapipe.confidence,
-              isDetected: bm.mediapipe.isDetected ?? true
-            }
-          })
-        }
-
-        if (bm.yolov8) {
-          await tx.yolov8Log.create({
-            data: {
-              sessionId,
-              fps: bm.yolov8.fps,
-              latencyMs: bm.yolov8.latencyMs,
-              landmarksCount: bm.yolov8.landmarksCount ?? 5,
-              memoryMb: bm.yolov8.memoryMb,
-              cpuLoadPct: bm.yolov8.cpuLoadPct,
-              confidence: bm.yolov8.confidence,
-              isDetected: bm.yolov8.isDetected ?? true
-            }
-          })
-        }
-
-        if (bm.dlib) {
-          await tx.dlibLog.create({
-            data: {
-              sessionId,
-              fps: bm.dlib.fps,
-              latencyMs: bm.dlib.latencyMs,
-              landmarksCount: bm.dlib.landmarksCount ?? 68,
-              memoryMb: bm.dlib.memoryMb,
-              cpuLoadPct: bm.dlib.cpuLoadPct,
-              confidence: bm.dlib.confidence,
-              isDetected: bm.dlib.isDetected ?? true
-            }
-          })
-        }
-
-        if (bm.openface) {
-          await tx.openFaceLog.create({
-            data: {
-              sessionId,
-              fps: bm.openface.fps,
-              latencyMs: bm.openface.latencyMs,
-              landmarksCount: bm.openface.landmarksCount ?? 68,
-              memoryMb: bm.openface.memoryMb,
-              cpuLoadPct: bm.openface.cpuLoadPct,
-              confidence: bm.openface.confidence,
-              isDetected: bm.openface.isDetected ?? true
-            }
-          })
-        }
-      }
+    await prisma.trackingLog.deleteMany({
+      where: { sessionId: sessionId }
     })
+
+    if (logsData.length > 0) {
+      const batchResult = await prisma.trackingLog.createMany({
+        data: logsData
+      })
+      logsCreated = batchResult.count
+    }
+
+    // บันทึกลงตารางโมเดลแยกแต่ละตัว (MediaPipe, YOLOv8, Dlib, OpenFace)
+    if (benchmarkMetrics) {
+      const bm = benchmarkMetrics as Record<string, {
+        fps?: number
+        latencyMs?: number
+        landmarksCount?: number
+        memoryMb?: number
+        cpuLoadPct?: number
+        confidence?: number
+        isDetected?: boolean
+      }>
+
+      // ลบข้อมูล log เก่าของโมเดลแยกใน session นี้ก่อนบันทึกใหม่
+      await Promise.all([
+        prisma.mediaPipeLog.deleteMany({ where: { sessionId } }),
+        prisma.yolov8Log.deleteMany({ where: { sessionId } }),
+        prisma.dlibLog.deleteMany({ where: { sessionId } }),
+        prisma.openFaceLog.deleteMany({ where: { sessionId } })
+      ])
+
+      if (bm.mediapipe) {
+        await prisma.mediaPipeLog.create({
+          data: {
+            sessionId,
+            fps: bm.mediapipe.fps,
+            latencyMs: bm.mediapipe.latencyMs,
+            landmarksCount: bm.mediapipe.landmarksCount ?? 468,
+            memoryMb: bm.mediapipe.memoryMb,
+            cpuLoadPct: bm.mediapipe.cpuLoadPct,
+            confidence: bm.mediapipe.confidence,
+            isDetected: bm.mediapipe.isDetected ?? true
+          }
+        })
+      }
+
+      if (bm.yolov8) {
+        await prisma.yolov8Log.create({
+          data: {
+            sessionId,
+            fps: bm.yolov8.fps,
+            latencyMs: bm.yolov8.latencyMs,
+            landmarksCount: bm.yolov8.landmarksCount ?? 5,
+            memoryMb: bm.yolov8.memoryMb,
+            cpuLoadPct: bm.yolov8.cpuLoadPct,
+            confidence: bm.yolov8.confidence,
+            isDetected: bm.yolov8.isDetected ?? true
+          }
+        })
+      }
+
+      if (bm.dlib) {
+        await prisma.dlibLog.create({
+          data: {
+            sessionId,
+            fps: bm.dlib.fps,
+            latencyMs: bm.dlib.latencyMs,
+            landmarksCount: bm.dlib.landmarksCount ?? 68,
+            memoryMb: bm.dlib.memoryMb,
+            cpuLoadPct: bm.dlib.cpuLoadPct,
+            confidence: bm.dlib.confidence,
+            isDetected: bm.dlib.isDetected ?? true
+          }
+        })
+      }
+
+      if (bm.openface) {
+        await prisma.openFaceLog.create({
+          data: {
+            sessionId,
+            fps: bm.openface.fps,
+            latencyMs: bm.openface.latencyMs,
+            landmarksCount: bm.openface.landmarksCount ?? 68,
+            memoryMb: bm.openface.memoryMb,
+            cpuLoadPct: bm.openface.cpuLoadPct,
+            confidence: bm.openface.confidence,
+            isDetected: bm.openface.isDetected ?? true
+          }
+        })
+      }
+    }
 
     // อัปเดตหรือสร้าง SessionStatistics
     const existingStats = await prisma.sessionStatistics.findUnique({
