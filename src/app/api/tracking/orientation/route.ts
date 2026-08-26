@@ -199,13 +199,7 @@ export async function POST(request: NextRequest) {
         isDetected?: boolean
       }>
 
-      // ลบข้อมูล log เก่าของโมเดลแยกใน session นี้ก่อนบันทึกใหม่
-      await Promise.all([
-        prisma.mediaPipeLog.deleteMany({ where: { sessionId } }),
-        prisma.yolov8Log.deleteMany({ where: { sessionId } }),
-        prisma.dlibLog.deleteMany({ where: { sessionId } }),
-        prisma.openFaceLog.deleteMany({ where: { sessionId } })
-      ])
+      // ข้อมูล log ของโมเดลแยกจะถูกบันทึกเพิ่มเข้าไปเรื่อยๆ (เก็บต่อเนื่อง)
 
       if (bm.mediapipe) {
         await prisma.mediaPipeLog.create({
