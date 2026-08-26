@@ -73,6 +73,8 @@ model TrackingSession {
   behaviorFeatureLogs BehaviorFeatureLog[]
 
   @@map("tracking_sessions")
+  @@index([userId])
+  @@index([startTime])
 }
 
 model TrackingLog {
