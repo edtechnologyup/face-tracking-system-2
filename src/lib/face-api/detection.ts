@@ -60,7 +60,6 @@ export async function loadFaceApiModels() {
       faceapi.nets.tinyFaceDetector.loadFromUri(PRIMARY_MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(PRIMARY_MODEL_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(PRIMARY_MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(PRIMARY_MODEL_URL),
     ]);
 
     isModelLoaded = true;
@@ -77,7 +76,6 @@ export async function loadFaceApiModels() {
       faceapi.nets.tinyFaceDetector.loadFromUri(FALLBACK_MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(FALLBACK_MODEL_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(FALLBACK_MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(FALLBACK_MODEL_URL),
     ]);
 
     isModelLoaded = true;
@@ -94,7 +92,6 @@ export async function loadFaceApiModels() {
       faceapi.nets.tinyFaceDetector.loadFromUri(UNPKG_MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(UNPKG_MODEL_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(UNPKG_MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(UNPKG_MODEL_URL),
     ]);
 
     isModelLoaded = true;
@@ -188,8 +185,7 @@ export async function detectFacePose(
 
     const detection = await faceapi
       .detectSingleFace(imageElement, detectionOptions)
-      .withFaceLandmarks()
-      .withFaceExpressions();
+      .withFaceLandmarks();
 
     if (!detection) {
       return {
@@ -200,8 +196,6 @@ export async function detectFacePose(
     }
 
     const landmarks = detection.landmarks;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const expressions = detection.expressions;
     
     // วิเคราะห์ท่าใบหน้าจาก landmarks
     const { pose, yaw } = analyzeFacePose(landmarks);
