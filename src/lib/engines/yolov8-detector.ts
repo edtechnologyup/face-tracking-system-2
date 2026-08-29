@@ -130,23 +130,8 @@ export class YOLOv8FaceDetector {
         });
       });
     } else {
-      // Dynamic Motion Bounding Box (when running standalone without landmarks)
-      const dynamicOffsetX = Math.sin(now / 350) * (vw * 0.035) + Math.cos(now / 520) * (vw * 0.02);
-      const dynamicOffsetY = Math.cos(now / 420) * (vh * 0.03) + Math.sin(now / 280) * (vh * 0.015);
-
-      const primaryX = Math.max(0, Math.round(vw * 0.275 + dynamicOffsetX));
-      const primaryY = Math.max(0, Math.round(vh * 0.225 + dynamicOffsetY));
-      const primaryW = Math.min(vw - primaryX, Math.round(vw * 0.45 + Math.sin(now / 550) * 12));
-      const primaryH = Math.min(vh - primaryY, Math.round(vh * 0.55 + Math.cos(now / 620) * 14));
-
-      boxes.push({
-        x: primaryX,
-        y: primaryY,
-        width: primaryW,
-        height: primaryH,
-        confidence: Number((0.962 + Math.sin(now / 240) * 0.015).toFixed(3)),
-        isPrimary: true,
-      });
+      // เมื่อไม่มี landmarks ส่งเข้ามา (ไม่พบใบหน้า) ไม่ควรสร้าง bounding box ปลอม
+      // เพื่อให้ isDetected คืนค่า false ได้อย่างถูกต้อง
     }
 
     // Add Simulated Intruder if toggle enabled for UI testing
