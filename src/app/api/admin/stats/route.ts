@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import jwt from 'jsonwebtoken'
 
-import { autoCloseStaleSessions } from '@/lib/utils/session-cleanup'
+// In-memory cache สำหรับ admin stats (TTL 30 วินาที)
+// ลดภาระ database เมื่อ admin refresh dashboard บ่อยๆ
+interface StatsCache {
+  data: Record<string, unknown>
+  timestamp: number
+}
+let statsCache: StatsCache | null = null
+const CACHE_TTL_MS = 30_000 // 30 วินาที
 
 export async function GET(request: NextRequest) {
   try {
@@ -49,8 +56,12 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // เคลียร์และปิดเซสชันที่ค้างเกิน 60 วินาทีให้อัตโนมัติก่อนประมวลผลสถิติ
-    await autoCloseStaleSessions()
+    // (autoCloseStaleSessions ถูกย้ายไปทำงานใน Cron Job ที่ /api/cron/cleanup-sessions แล้ว)
+
+    // ตรวจสอบ cache — ถ้ามี cache ที่ยังไม่หมดอายุ ส่งกลับเลยไม่ต้อง query ใหม่
+    if (statsCache && Date.now() - statsCache.timestamp < CACHE_TTL_MS) {
+      return NextResponse.json(statsCache.data)
+    }
 
     // ดึงข้อมูลสถิติพื้นฐาน
     const [totalUsers, totalAdmins, totalSessions, activeSessions, interruptedSessions, totalSecurityViolations] = await Promise.all([
@@ -207,7 +218,7 @@ export async function GET(request: NextRequest) {
       }
     ]
 
-    return NextResponse.json({
+    const responseData = {
       totalUsers,
       totalAdmins,
       totalSessions,
@@ -215,7 +226,12 @@ export async function GET(request: NextRequest) {
       interruptedSessions,
       totalSecurityViolations,
       chartData
-    })
+    }
+
+    // บันทึกลง cache สำหรับ 30 วินาทีถัดไป
+    statsCache = { data: responseData, timestamp: Date.now() }
+
+    return NextResponse.json(responseData)
 
   } catch (error) {
     console.error('Admin stats error:', error)

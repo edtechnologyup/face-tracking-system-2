@@ -218,16 +218,16 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     try {
       if (!offscreenCanvasRef.current) {
         offscreenCanvasRef.current = document.createElement('canvas')
-        offscreenCanvasRef.current.width = 320
-        offscreenCanvasRef.current.height = 240
+        offscreenCanvasRef.current.width = 160
+        offscreenCanvasRef.current.height = 120
       }
 
       const offscreenCanvas = offscreenCanvasRef.current
       const ctx = offscreenCanvas.getContext('2d')
       if (!ctx) return
 
-      ctx.drawImage(video, 0, 0, 320, 240)
-      const base64Image = offscreenCanvas.toDataURL('image/jpeg', 0.8)
+      ctx.drawImage(video, 0, 0, 160, 120)
+      const base64Image = offscreenCanvas.toDataURL('image/jpeg', 0.6)
 
       const token = localStorage.getItem('token')
       const landmarks = mediaPipeData?.landmarks ? mediaPipeData.landmarks.map(l => ({ x: l.x, y: l.y, z: l.z })) : undefined
@@ -257,17 +257,17 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
   }, [mediaPipeData])
 
-  // Periodic Snapshot Trigger (ทุกๆ 8 วินาทีระหว่างการติดตาม)
+  // Periodic Snapshot Trigger (ทุกๆ 20 วินาทีระหว่างการติดตาม)
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null
     if (isActive) {
       const timeout = setTimeout(() => {
         sendSnapshotForDeepAnalytics()
-      }, 2000)
+      }, 5000)
 
       interval = setInterval(() => {
         sendSnapshotForDeepAnalytics()
-      }, 8000)
+      }, 20000)
 
       return () => {
         clearTimeout(timeout)

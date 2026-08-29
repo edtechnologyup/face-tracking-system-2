@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { validateEmail } from '@/lib/utils/validation'
+import { rateLimit } from '@/lib/utils/rate-limiter'
 
 export async function GET(request: NextRequest) {
   // ส่งกลับไปที่หน้าเข้าสู่ระบบ
@@ -12,6 +13,17 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json()
+
+    // Rate limiting: ป้องกัน brute force — จำกัด 5 requests per email, refill 0.1 tokens/s
+    if (email) {
+      const { allowed } = rateLimit(`login:${email}`, 5, 0.1)
+      if (!allowed) {
+        return NextResponse.json(
+          { error: 'คุณพยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่' },
+          { status: 429 }
+        )
+      }
+    }
 
     // ตรวจสอบรูปแบบอีเมลและรับอีเมลที่ได้ปรับปรุงแล้ว
     const emailValidation = validateEmail(email)

@@ -41,12 +41,12 @@ export function BehaviorFeatureSync({
     startTime: Date.now()
   });
 
-  // Sample data at ~10Hz (every 100ms)
+  // Sample data at 1Hz (every 1000ms) เพื่อลดภาระ Database
   useEffect(() => {
     if (!isActive || !sessionId) return
 
     const now = Date.now()
-    if (now - lastSampleTimeRef.current < 100) return // Throttle to 100ms
+    if (now - lastSampleTimeRef.current < 1000) return // Throttle to 1000ms
     lastSampleTimeRef.current = now
 
     const hasFace = !!(mediaPipeData?.isDetected || yoloData?.isDetected)
@@ -259,8 +259,8 @@ export function BehaviorFeatureSync({
 
     logBufferRef.current.push(logEntry)
 
-    // Auto-sync every 50 frames (approx 5 seconds)
-    if (logBufferRef.current.length >= 50) {
+    // Auto-sync every 5 frames (approx 5 seconds)
+    if (logBufferRef.current.length >= 5) {
       const logsToSend = [...logBufferRef.current]
       logBufferRef.current = [] // reset buffer
       
@@ -274,7 +274,8 @@ export function BehaviorFeatureSync({
         })
       }).catch(err => {
         console.error('Failed to sync behavior features:', err)
-        // If fail, we drop them to avoid memory leaks or retry logic if needed
+        // Re-queue failed logs back to buffer for retry (cap at 200 to prevent memory leak)
+        logBufferRef.current = [...logsToSend, ...logBufferRef.current].slice(0, 200)
       })
     }
   }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData, participantCode])

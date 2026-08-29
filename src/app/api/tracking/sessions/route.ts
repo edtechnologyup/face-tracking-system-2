@@ -188,8 +188,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
     }
 
-    // เคลียร์และปิดเซสชันที่ค้างเกิน 60 วินาทีโดยอัตโนมัติก่อนดึงข้อมูล
-    await autoCloseStaleSessions()
+    // (autoCloseStaleSessions ถูกย้ายไปทำงานใน Cron Job ที่ /api/cron/cleanup-sessions แล้ว)
 
     // ดึงข้อมูล sessions ของ user
     const sessions = await prisma.trackingSession.findMany({

@@ -316,6 +316,8 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
   // Start Dual Hybrid Tracking Loops for 4 Concurrent Models
   const startHybridTracking = useCallback((videoRef: React.RefObject<HTMLVideoElement | null>) => {
     if (!videoRef.current) return
+    // Prevent duplicate loops if already tracking
+    if (isActiveRef.current) return
     setIsActive(true)
     isActiveRef.current = true
 

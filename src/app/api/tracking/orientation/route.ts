@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import jwt from 'jsonwebtoken'
+import { rateLimit } from '@/lib/utils/rate-limiter'
 
 // Interface สำหรับ request body
 interface OrientationEvent {
@@ -77,6 +78,12 @@ export async function POST(request: NextRequest) {
       userId = decoded.userId
     } catch {
       return NextResponse.json({ error: 'Token ไม่ถูกต้อง' }, { status: 401 })
+    }
+
+    // Rate limiting: จำกัด 10 requests per user, refill 1 token/s (ปกติเรียกทุก 15 วินาที)
+    const { allowed } = rateLimit(`orientation:${userId}`, 10, 1)
+    if (!allowed) {
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
     }
 
     const body: OrientationLogRequest = await request.json()
@@ -161,28 +168,47 @@ export async function POST(request: NextRequest) {
       console.log(`🚨 ตรวจพบ Security Violations: ${securityViolationLogsCount} รายการ`)
     }
 
-    // (นำการบันทึก BENCHMARK_METRICS ลง tracking_log ออกตามความต้องการ เพื่อลดความซ้ำซ้อน)
-
-    // 5. ทำการบันทึกข้อมูลอย่างถูกต้อง (ลบ log เก่าของ session เพื่อกันข้อมูลซ้ำจากการ auto-sync แล้วลง log ชุดใหม่ล่าสุด)
+    // 5. บันทึกข้อมูลแบบ append-only (เพิ่มเฉพาะ events ใหม่ที่ยังไม่เคยบันทึก)
+    // แทนที่ delete+create ทั้งหมดทุกรอบ เพื่อลด write amplification สำหรับ 100+ users พร้อมกัน
     let logsCreated = 0
 
-    await prisma.trackingLog.deleteMany({
-      where: { 
-        sessionId: sessionId,
-        detectionType: {
-          in: ['FACE_ORIENTATION', 'FACE_DETECTION_LOSS', 'SECURITY_VIOLATION']
-        }
-      }
-    })
-
     if (logsData.length > 0) {
-      const batchResult = await prisma.trackingLog.createMany({
-        data: logsData
+      // ดึง timestamp ของ log ล่าสุดที่เคยบันทึกไว้ เพื่อกรองเฉพาะ events ใหม่
+      const lastLog = await prisma.trackingLog.findFirst({
+        where: { 
+          sessionId: sessionId,
+          detectionType: {
+            in: ['FACE_ORIENTATION', 'FACE_DETECTION_LOSS', 'SECURITY_VIOLATION']
+          }
+        },
+        orderBy: { timestamp: 'desc' },
+        select: { timestamp: true }
       })
-      logsCreated = batchResult.count
+
+      // กรองเฉพาะ events ที่มี startTime ใหม่กว่า log ล่าสุด
+      const lastTimestamp = lastLog?.timestamp || new Date(0)
+      const newLogsData = logsData.filter(log => {
+        const detectionData = log.detectionData as Record<string, unknown> | null
+        if (detectionData && typeof detectionData === 'object') {
+          const startTimeStr = (detectionData as Record<string, unknown>).startTime as string | undefined
+          const timestampStr = (detectionData as Record<string, unknown>).timestamp as string | undefined
+          const eventTime = startTimeStr ? new Date(startTimeStr) : 
+                           timestampStr ? new Date(timestampStr) : new Date()
+          return eventTime > lastTimestamp
+        }
+        return true // ถ้าไม่มี detectionData ให้บันทึกไว้ก่อน
+      })
+
+      if (newLogsData.length > 0) {
+        const batchResult = await prisma.trackingLog.createMany({
+          data: newLogsData
+        })
+        logsCreated = batchResult.count
+      }
     }
 
     // บันทึกลงตารางโมเดลแยกแต่ละตัว (MediaPipe, YOLOv8, Dlib, OpenFace)
+    // ใช้ Promise.all เพื่อส่ง queries พร้อมกัน (1 round-trip แทน 4 sequential round-trips)
     if (benchmarkMetrics) {
       const bm = benchmarkMetrics as Record<string, {
         fps?: number
@@ -194,10 +220,10 @@ export async function POST(request: NextRequest) {
         isDetected?: boolean
       }>
 
-      // ข้อมูล log ของโมเดลแยกจะถูกบันทึกเพิ่มเข้าไปเรื่อยๆ (เก็บต่อเนื่อง)
+      const benchmarkPromises = []
 
       if (bm.mediapipe) {
-        await prisma.mediaPipeLog.create({
+        benchmarkPromises.push(prisma.mediaPipeLog.create({
           data: {
             sessionId,
             fps: bm.mediapipe.fps,
@@ -208,11 +234,11 @@ export async function POST(request: NextRequest) {
             confidence: bm.mediapipe.confidence,
             isDetected: bm.mediapipe.isDetected ?? true
           }
-        })
+        }))
       }
 
       if (bm.yolov8) {
-        await prisma.yolov8Log.create({
+        benchmarkPromises.push(prisma.yolov8Log.create({
           data: {
             sessionId,
             fps: bm.yolov8.fps,
@@ -223,11 +249,11 @@ export async function POST(request: NextRequest) {
             confidence: bm.yolov8.confidence,
             isDetected: bm.yolov8.isDetected ?? true
           }
-        })
+        }))
       }
 
       if (bm.dlib) {
-        await prisma.dlibLog.create({
+        benchmarkPromises.push(prisma.dlibLog.create({
           data: {
             sessionId,
             fps: bm.dlib.fps,
@@ -238,11 +264,11 @@ export async function POST(request: NextRequest) {
             confidence: bm.dlib.confidence,
             isDetected: bm.dlib.isDetected ?? true
           }
-        })
+        }))
       }
 
       if (bm.openface) {
-        await prisma.openFaceLog.create({
+        benchmarkPromises.push(prisma.openFaceLog.create({
           data: {
             sessionId,
             fps: bm.openface.fps,
@@ -253,15 +279,15 @@ export async function POST(request: NextRequest) {
             confidence: bm.openface.confidence,
             isDetected: bm.openface.isDetected ?? true
           }
-        })
+        }))
+      }
+
+      if (benchmarkPromises.length > 0) {
+        await Promise.all(benchmarkPromises)
       }
     }
 
-    // อัปเดตหรือสร้าง SessionStatistics
-    const existingStats = await prisma.sessionStatistics.findUnique({
-      where: { sessionId: sessionId }
-    })
-
+    // อัปเดตหรือสร้าง SessionStatistics (ใช้ upsert แทน findUnique + if/else เพื่อลด query จาก 2 เหลือ 1)
     // === FACE TRACKING SUMMARY (No Duplicated Data) ===
     const statsData = {
       // Face orientation counts only - ข้อมูลสรุปจำนวนครั้ง
@@ -289,22 +315,14 @@ export async function POST(request: NextRequest) {
       benchmarkMetrics: benchmarkMetrics ? (benchmarkMetrics as unknown as Prisma.InputJsonValue) : undefined
     }
 
-    let sessionStatistics
-    if (existingStats) {
-      // อัปเดตสถิติที่มีอยู่
-      sessionStatistics = await prisma.sessionStatistics.update({
-        where: { sessionId: sessionId },
-        data: statsData
-      })
-    } else {
-      // สร้างสถิติใหม่
-      sessionStatistics = await prisma.sessionStatistics.create({
-        data: {
-          sessionId: sessionId,
-          ...statsData
-        }
-      })
-    }
+    const sessionStatistics = await prisma.sessionStatistics.upsert({
+      where: { sessionId: sessionId },
+      update: statsData,
+      create: {
+        sessionId: sessionId,
+        ...statsData
+      }
+    })
 
     console.log(`✅ บันทึก logs ทั้งหมด ${logsCreated} รายการ สำหรับ session ${sessionId}`)
     

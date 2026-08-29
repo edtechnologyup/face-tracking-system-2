@@ -2,7 +2,7 @@
 mkdir -p public/models
 cd public/models
 
-BASE_URL="https://unpkg.com/@vladmandic/face-api@1.7.12/model"
+BASE_URL="https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights"
 
 FILES=(
   "tiny_face_detector_model-weights_manifest.json"

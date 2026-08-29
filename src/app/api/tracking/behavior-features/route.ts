@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { rateLimit } from '@/lib/utils/rate-limiter'
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,6 +14,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Rate limiting: จำกัด 30 requests per session, refill 3 tokens/s (ปกติเรียกทุก 5 วินาที)
+    const { allowed } = rateLimit(`behavior:${sessionId}`, 30, 3)
+    if (!allowed) {
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
+    }
+
     if (!logs || !Array.isArray(logs) || logs.length === 0) {
       return NextResponse.json(
         { error: 'No logs provided or invalid format' },
@@ -20,9 +27,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Cap batch size to prevent oversized payloads crashing the server
+    const MAX_BATCH_SIZE = 100
+    const safeLogs = logs.slice(0, MAX_BATCH_SIZE)
+
     // Prepare data for batch insert
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const logsData = logs.map((log: any) => ({
+    const logsData = safeLogs.map((log: any) => ({
       sessionId: sessionId,
       participantCode: log.participantCode || null,
       timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
