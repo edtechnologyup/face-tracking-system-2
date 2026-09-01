@@ -191,10 +191,10 @@ export class MediaPipeDetector {
   private lastSentDirection: string = '';
   
   // Thresholds & Hysteresis Margins for direction detection
-  private readonly YAW_THRESHOLD = 15;
+  private readonly YAW_THRESHOLD = 20;
   private readonly PITCH_UP_THRESHOLD = 14.0;
   private readonly PITCH_DOWN_THRESHOLD = 12.0;
-  private readonly HYSTERESIS_MARGIN = 2.0; // รัศมีเผื่อ 2 องศาเพื่อป้องกันการตรวจจับสลับไปมาตรงขอบ
+  private readonly HYSTERESIS_MARGIN = 5.0; // รัศมีเผื่อ 5 องศาเพื่อป้องกันการตรวจจับสลับไปมาตรงขอบ
 
   // Signal smoothing state
   private smoothedYaw: number = 0;
@@ -690,8 +690,8 @@ export class MediaPipeDetector {
     // ใช้ค่าเฉลี่ยของทั้งสองวิธี
     const estimatedCm = (distanceFromWidth + distanceFromHeight) / 2;
     
-    // ตรวจสอบว่าระยะห่างเกิน 80cm หรือไม่
-    const DISTANCE_THRESHOLD_CM = 80;
+    // ตรวจสอบว่าระยะห่างเกิน 70cm หรือไม่
+    const DISTANCE_THRESHOLD_CM = 70;
     const isTooFar = estimatedCm > DISTANCE_THRESHOLD_CM;
     
     return {

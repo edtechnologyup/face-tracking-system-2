@@ -57,7 +57,8 @@ export const FACE_API_CONFIG = {
   
   // เกณฑ์สำหรับการตรวจจับท่า
   POSE_YAW_THRESHOLD: 15,
-  BLINK_EAR_THRESHOLD: 0.25,
+  // CBMI Parameter Adjustment Guide: EAR ต้องต่ำกว่า 0.10 ร่วมกับ headPitch > 10 องศา จึงจะถือว่า disengaged
+  BLINK_EAR_THRESHOLD: 0.10,
   
   // การตั้งค่าโมเดล
   MODEL_INPUT_SIZE: 416,

@@ -3,6 +3,12 @@ import { useEffect, useRef } from 'react'
 import { analyzeImageQuality } from '@/lib/image-quality'
 import { calculateOcclusionScore } from '@/lib/occlusion-utils'
 
+// CBMI Parameter Adjustment Guide: เกณฑ์ภาวะไม่มีส่วนร่วม (Disengagement) - ต้องเข้าเงื่อนไขทั้งดวงตาและมุมก้มศีรษะพร้อมกัน
+const EAR_DISENGAGEMENT_THRESHOLD = 0.10
+const HEAD_PITCH_DISENGAGEMENT_THRESHOLD = 10
+// CBMI Parameter Adjustment Guide: ความสว่างขั้นต่ำที่ยอมรับได้ของเฟรม
+const BRIGHTNESS_MIN_THRESHOLD = 0.20
+
 export interface BehaviorFeatureSyncProps {
   participantCode?: string;
   isActive: boolean
@@ -105,7 +111,7 @@ export function BehaviorFeatureSync({
       computedScenario = 'MULTIPLE_FACES';
     } else if (currentOcclusionScore >= 0.8) {
       computedScenario = 'OCCLUSION';
-    } else if (latestQualityRef.current.brightnessMean < 0.2) {
+    } else if (latestQualityRef.current.brightnessMean < BRIGHTNESS_MIN_THRESHOLD) {
       computedScenario = 'LOW_LIGHT';
     } else if (mediaPipeData?.distance?.estimatedCm && mediaPipeData.distance.estimatedCm > 100) {
       computedScenario = 'DISTANCE_1M';
@@ -200,8 +206,8 @@ export function BehaviorFeatureSync({
       cameraWidth: null,
       cameraHeight: null,
       cameraFps: currentFpsRef.current,
-      isValid: hasFace && (yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0)) <= 1 && currentOcclusionScore < 0.8,
-      invalidReason: !hasFace ? 'NO_FACE_DETECTED' : ((yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0)) > 1 ? 'MULTIPLE_FACES_DETECTED' : (currentOcclusionScore >= 0.8 ? 'FACE_OCCLUDED' : null)),
+      isValid: hasFace && (yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0)) <= 1 && currentOcclusionScore < 0.8 && latestQualityRef.current.brightnessMean >= BRIGHTNESS_MIN_THRESHOLD,
+      invalidReason: !hasFace ? 'NO_FACE_DETECTED' : ((yoloData?.faceCount || mediaPipeData?.multipleFaces?.count || (hasFace ? 1 : 0)) > 1 ? 'MULTIPLE_FACES_DETECTED' : (currentOcclusionScore >= 0.8 ? 'FACE_OCCLUDED' : (latestQualityRef.current.brightnessMean < BRIGHTNESS_MIN_THRESHOLD ? 'LOW_BRIGHTNESS' : null))),
       pipelineVersion: 'hybrid-1.0'
     }
 
@@ -235,6 +241,20 @@ export function BehaviorFeatureSync({
       
       logEntry.leftEyeOpenness = logEntry.leftEAR; // Simplified proxy
       logEntry.rightEyeOpenness = logEntry.rightEAR;
+
+      // CBMI Parameter Adjustment Guide: flag disengagement เฉพาะเมื่อ EAR ต่ำกว่าเกณฑ์ (ตาเกือบปิดสนิท)
+      // ร่วมกับการก้มศีรษะเกินเกณฑ์ (headPitch) พร้อมกันเท่านั้น ป้องกัน false positive จากการกระพริบตาปกติ
+      const avgEAR = (logEntry.leftEAR !== null && logEntry.rightEAR !== null)
+        ? (logEntry.leftEAR + logEntry.rightEAR) / 2
+        : null;
+      const isEyeDisengaged = avgEAR !== null &&
+        avgEAR < EAR_DISENGAGEMENT_THRESHOLD &&
+        (logEntry.headPitch || 0) > HEAD_PITCH_DISENGAGEMENT_THRESHOLD;
+      if (isEyeDisengaged) {
+        logEntry.scenario = 'EYES_CLOSED_DISENGAGED';
+        logEntry.isValid = false;
+        logEntry.invalidReason = 'EYES_CLOSED_DISENGAGED';
+      }
       
       // Head Roll estimation (angle between eyes)
       if (lms[33] && lms[362]) {

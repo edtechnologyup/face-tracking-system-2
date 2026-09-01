@@ -56,6 +56,9 @@ interface OrientationLogRequest {
   benchmarkMetrics?: Record<string, unknown>;
 }
 
+// CBMI Parameter Adjustment Guide: ข้าม event ที่มีระยะเวลาสั้นกว่าเกณฑ์นี้ก่อนบันทึกลงฐานข้อมูล (ป้องกัน noise จากการหันหน้า/หลุด face สั้นๆ)
+const SUSTAINED_DURATION_SEC = 2
+
 // บันทึกข้อมูล orientation tracking
 export async function POST(request: NextRequest) {
   try {
@@ -106,6 +109,10 @@ export async function POST(request: NextRequest) {
 
     // 1. เพิ่ม orientation events
     events.forEach(event => {
+      // ข้าม event ที่ duration สั้นกว่าเกณฑ์ Sustained Duration ก่อนบันทึกลงฐานข้อมูล
+      if (typeof event.duration === 'number' && event.duration < SUSTAINED_DURATION_SEC) {
+        return
+      }
       logsData.push({
         sessionId: sessionId,
         detectionType: 'FACE_ORIENTATION',
@@ -125,7 +132,7 @@ export async function POST(request: NextRequest) {
     let lossLogsCount = 0
     if (faceDetectionLossEvents && faceDetectionLossEvents.length > 0) {
       faceDetectionLossEvents.forEach(event => {
-        if (!event.isActive && event.endTime && event.duration) {
+        if (!event.isActive && event.endTime && event.duration && event.duration >= SUSTAINED_DURATION_SEC) {
           logsData.push({
             sessionId: sessionId,
             detectionType: 'FACE_DETECTION_LOSS',
