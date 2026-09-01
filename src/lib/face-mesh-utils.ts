@@ -264,20 +264,28 @@ export function drawSciFiFaceMesh(
   video: HTMLVideoElement | null,
   canvasWidth: number,
   canvasHeight: number,
-  isLookingAway: boolean
+  isLookingAway: boolean,
+  overlayMode: 'full' | 'contours' | 'minimal' = 'full'
 ) {
+  if (overlayMode === 'minimal') {
+    return;
+  }
+
   try {
     const coordinates = calculateCoordinates(video, canvasWidth, canvasHeight)
     const colors = getDrawingColors(isLookingAway)
     
-    // วาดจุด landmarks
-    drawLandmarkPoints(ctx, landmarks, coordinates, colors.primary)
+    if (overlayMode === 'full') {
+      drawLandmarkPoints(ctx, landmarks, coordinates, colors.primary)
+    }
     
-    // วาดเส้นโครงต่างๆ
     drawFaceContours(ctx, landmarks, coordinates, colors.primary)
     drawEyeContours(ctx, landmarks, coordinates, colors.primary)
-    drawMouthContours(ctx, landmarks, coordinates, colors.primary)
-    drawNoseContours(ctx, landmarks, coordinates, colors.primary)
+
+    if (overlayMode === 'full') {
+      drawMouthContours(ctx, landmarks, coordinates, colors.primary)
+      drawNoseContours(ctx, landmarks, coordinates, colors.primary)
+    }
     
   } catch (error) {
     console.error('❌ เกิดข้อผิดพลาดในการวาด Face Mesh:', error)

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { rateLimit } from '@/lib/utils/rate-limiter'
+import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limiter'
 import { validateBehaviorLogBatch } from '@/lib/pipeline-qa'
 import { aggregateScenarioCounts } from '@/lib/behavior-rule-labeler'
 
@@ -55,7 +55,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Rate limiting: จำกัด 30 requests per session, refill 3 tokens/s (ปกติเรียกทุก 5 วินาที)
-    const { allowed } = rateLimit(`behavior:${sessionId}`, 30, 3)
+    const { allowed } = await checkRateLimit({
+      key: `behavior:${sessionId}`,
+      ...RATE_LIMITS.behaviorFeatures,
+    })
     if (!allowed) {
       return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
     }
@@ -139,6 +142,12 @@ export async function POST(request: NextRequest) {
       detectionFps: log.detectionFps ?? log.cameraFps ?? null,
       cameraStreamFps: log.cameraStreamFps ?? null,
       sampleRateHz: log.sampleRateHz ?? null,
+
+      deviceTier: log.deviceTier ?? null,
+      trackingProfile: log.trackingProfile ?? null,
+      userAgent: log.userAgent ?? null,
+      researchEligible:
+        log.researchEligible !== undefined ? Boolean(log.researchEligible) : null,
       
       isValid: log.isValid !== undefined ? Boolean(log.isValid) : true,
       invalidReason: log.invalidReason ?? null,

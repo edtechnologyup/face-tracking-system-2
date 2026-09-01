@@ -83,7 +83,7 @@ export interface OpenFaceProvenanceEngine {
 }
 
 export interface FeatureProvenancePayload {
-  _schema: 'feature-provenance-v2';
+  _schema: 'feature-provenance-v2' | 'feature-provenance-v2-slim';
   fields: Record<string, FieldProvenance>;
   engines?: {
     yolo?: YoloProvenanceEngine;
@@ -425,5 +425,28 @@ export function buildBehaviorFeatureProvenance(input: {
         perEyeVectorSource: input.perEyeGazeVectorSource ?? 'none',
       },
     },
+  };
+}
+
+/** Slim provenance for high-volume exam logging — keeps key field levels + gaze source only. */
+export function slimFeatureProvenance(
+  full: FeatureProvenancePayload
+): FeatureProvenancePayload {
+  const pick = (name: string) =>
+    full.fields[name] ? { [name]: full.fields[name] } : {};
+
+  return {
+    _schema: 'feature-provenance-v2-slim',
+    fields: {
+      ...pick('faceConfidence'),
+      ...pick('headYaw'),
+      ...pick('headPitch'),
+      ...pick('gazeYaw'),
+      ...pick('gazePitch'),
+      ...pick('yoloConfidence'),
+    },
+    engines: full.engines?.gaze
+      ? { gaze: full.engines.gaze }
+      : undefined,
   };
 }

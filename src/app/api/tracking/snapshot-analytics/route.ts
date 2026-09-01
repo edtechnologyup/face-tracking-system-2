@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { L2CSGazeDetector, predictGazeHeuristic } from '@/lib/engines/l2cs-gaze-detector'
 import { MiniFASNetLivenessDetector } from '@/lib/engines/minifas-liveness'
-import { rateLimit } from '@/lib/utils/rate-limiter'
+import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limiter'
 import {
   labelBehaviorFromFeatures,
   scenarioToViolationType,
@@ -28,7 +28,10 @@ export async function POST(request: NextRequest) {
 
     // Rate limiting: จำกัด 15 requests per session, refill 2 tokens/s (ปกติเรียกทุก 20 วินาที)
     if (sessionId) {
-      const { allowed } = rateLimit(`snapshot:${sessionId}`, 15, 2)
+      const { allowed } = await checkRateLimit({
+        key: `snapshot:${sessionId}`,
+        ...RATE_LIMITS.snapshotAnalytics,
+      })
       if (!allowed) {
         return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
       }

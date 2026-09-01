@@ -16,7 +16,7 @@ import {
 /** featureSchemaVersion ปัจจุบัน */
 export const CURRENT_FEATURE_SCHEMA_VERSION = '2.8';
 /** pipelineVersion ปัจจุบัน */
-export const CURRENT_PIPELINE_VERSION = 'hybrid-4.0-schema-v2.8';
+export const CURRENT_PIPELINE_VERSION = 'hybrid-4.1-tracking-profile';
 
 /** Freshness windows (ms) — engine result เก่ากว่านี้ถือว่า stale → null */
 export const FRESHNESS_WINDOWS_MS = {
@@ -442,11 +442,15 @@ export function validateFeatureProvenance(provenance: unknown): ProvenanceValida
   }
 
   const record = provenance as Record<string, unknown>;
-  if (record._schema !== 'feature-provenance-v2') {
+  const schema = record._schema;
+  if (
+    schema !== 'feature-provenance-v2' &&
+    schema !== 'feature-provenance-v2-slim'
+  ) {
     issues.push({
       field: 'featureProvenance._schema',
       severity: 'warn',
-      message: `unexpected schema: ${String(record._schema)}`,
+      message: `unexpected schema: ${String(schema)}`,
     });
   }
 

@@ -1,68 +1,121 @@
 /**
- * Simple Token-Bucket Rate Limiter สำหรับ Vercel Serverless
- * ใช้ in-memory Map + auto cleanup เพื่อป้องกัน memory leak
- * 
- * หมายเหตุ: Rate limit จะ reset เมื่อ serverless function cold start ใหม่
- * ถ้าต้องการ persistent rate limiting ข้าม instances ให้ใช้ Upstash Redis แทน
+ * Token-bucket rate limiter with optional Upstash Redis for multi-instance deployments.
  */
+
+import {
+  isRedisRateLimitConfigured,
+  redisRateLimitAllowed,
+} from '@/lib/utils/redis-rate-limiter';
 
 interface RateLimitEntry {
-  tokens: number
-  lastRefill: number
+  tokens: number;
+  lastRefill: number;
 }
 
-const store = new Map<string, RateLimitEntry>()
+const store = new Map<string, RateLimitEntry>();
 
-// Cleanup entries ที่ไม่ active เกิน 2 นาที เพื่อป้องกัน memory leak
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
-    const now = Date.now()
+    const now = Date.now();
     for (const [key, entry] of store) {
       if (now - entry.lastRefill > 120_000) {
-        store.delete(key)
+        store.delete(key);
       }
     }
-  }, 60_000)
+  }, 60_000);
 }
 
-/**
- * ตรวจสอบ rate limit ด้วย token bucket algorithm
- * 
- * @param key - Unique identifier (เช่น userId, IP address)
- * @param maxTokens - จำนวน tokens สูงสุด (burst capacity)
- * @param refillRate - จำนวน tokens ที่เติมต่อวินาที
- * @returns { allowed, remaining } - allowed=true ถ้ายังไม่เกิน limit
- * 
- * @example
- * // Tracking endpoint: อนุญาต 30 requests, เติม 3 tokens/s
- * const { allowed } = rateLimit(`tracking:${userId}`, 30, 3)
- * 
- * // Auth endpoint: อนุญาต 5 requests, เติม 0.1 tokens/s (1 ทุก 10 วินาที)
- * const { allowed } = rateLimit(`auth:${ip}`, 5, 0.1)
- */
+function inMemoryRateLimit(
+  key: string,
+  maxTokens: number,
+  refillRate: number
+): { allowed: boolean; remaining: number } {
+  const now = Date.now();
+  let entry = store.get(key);
+
+  if (!entry) {
+    entry = { tokens: maxTokens - 1, lastRefill: now };
+    store.set(key, entry);
+    return { allowed: true, remaining: entry.tokens };
+  }
+
+  const elapsedSeconds = (now - entry.lastRefill) / 1000;
+  entry.tokens = Math.min(maxTokens, entry.tokens + elapsedSeconds * refillRate);
+  entry.lastRefill = now;
+
+  if (entry.tokens < 1) {
+    return { allowed: false, remaining: 0 };
+  }
+
+  entry.tokens -= 1;
+  return { allowed: true, remaining: Math.floor(entry.tokens) };
+}
+
+/** Sync in-memory limiter (legacy). */
 export function rateLimit(
   key: string,
   maxTokens: number = 30,
-  refillRate: number = 3 // tokens per second
+  refillRate: number = 3
 ): { allowed: boolean; remaining: number } {
-  const now = Date.now()
-  let entry = store.get(key)
-
-  if (!entry) {
-    entry = { tokens: maxTokens - 1, lastRefill: now }
-    store.set(key, entry)
-    return { allowed: true, remaining: entry.tokens }
-  }
-
-  // Refill tokens ตามเวลาที่ผ่านไป
-  const elapsedSeconds = (now - entry.lastRefill) / 1000
-  entry.tokens = Math.min(maxTokens, entry.tokens + elapsedSeconds * refillRate)
-  entry.lastRefill = now
-
-  if (entry.tokens < 1) {
-    return { allowed: false, remaining: 0 }
-  }
-
-  entry.tokens -= 1
-  return { allowed: true, remaining: Math.floor(entry.tokens) }
+  return inMemoryRateLimit(key, maxTokens, refillRate);
 }
+
+export interface RateLimitCheckOptions {
+  key: string;
+  /** Burst capacity (in-memory token bucket). */
+  maxTokens: number;
+  /** Tokens refilled per second (in-memory). */
+  refillRate: number;
+  /** Redis fixed-window max requests (when UPSTASH_* configured). */
+  redisMaxRequests?: number;
+  /** Redis window seconds (default 60). */
+  redisWindowSeconds?: number;
+}
+
+/**
+ * Prefer Redis when configured; otherwise in-memory token bucket.
+ * Both layers must pass when Redis is active (defense in depth).
+ */
+export async function checkRateLimit(
+  options: RateLimitCheckOptions
+): Promise<{ allowed: boolean; remaining: number; backend: 'redis' | 'memory' | 'both' }> {
+  const {
+    key,
+    maxTokens,
+    refillRate,
+    redisMaxRequests = maxTokens * 2,
+    redisWindowSeconds = 60,
+  } = options;
+
+  const memory = inMemoryRateLimit(key, maxTokens, refillRate);
+
+  if (!isRedisRateLimitConfigured()) {
+    return { ...memory, backend: 'memory' };
+  }
+
+  const redisAllowed = await redisRateLimitAllowed(
+    `rl:${key}`,
+    redisMaxRequests,
+    redisWindowSeconds
+  );
+
+  if (redisAllowed === null) {
+    return { ...memory, backend: 'memory' };
+  }
+
+  const allowed = memory.allowed && redisAllowed;
+  return {
+    allowed,
+    remaining: memory.remaining,
+    backend: 'both',
+  };
+}
+
+/** Pre-tuned limits for ~90 concurrent exam sessions. */
+export const RATE_LIMITS = {
+  behaviorFeatures: { maxTokens: 60, refillRate: 6, redisMaxRequests: 120 },
+  orientation: { maxTokens: 24, refillRate: 2, redisMaxRequests: 48 },
+  snapshotAnalytics: { maxTokens: 20, refillRate: 2, redisMaxRequests: 40 },
+  openfaceAnalyze: { maxTokens: 15, refillRate: 0.5, redisMaxRequests: 30 },
+  login: { maxTokens: 5, refillRate: 0.1, redisMaxRequests: 10 },
+} as const;

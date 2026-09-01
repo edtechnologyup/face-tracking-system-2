@@ -8,6 +8,8 @@ import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
 import { BehaviorFeatureSync } from "./BehaviorFeatureSync"
 import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
+import { buildTrackingRuntimeConfig } from '@/lib/tracking-profile'
+import { usePageVisibility } from '@/hooks/usePageVisibility'
 import {
   formatBenchmarkConfidence,
   formatBenchmarkFps,
@@ -51,8 +53,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   const sessionIdRef = useRef<string | null>(null)
   const isSessionSavedRef = useRef(false)
   const benchmarkSyncCounterRef = useRef(0)
-  // Persist benchmark rows every 4 orientation syncs (~60s) to free DB writes for behavior logs
-  const BENCHMARK_SYNC_EVERY_N = 4
+  const trackingConfigRef = useRef(buildTrackingRuntimeConfig())
+  const ORIENTATION_SYNC_MS = 15_000
+  const benchmarkSyncEveryN = Math.max(
+    1,
+    Math.round(trackingConfigRef.current.syncedBenchmarkIntervalMs / ORIENTATION_SYNC_MS)
+  )
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
@@ -84,11 +90,26 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     getBenchmarkMetrics,
     captureSyncedBenchmark,
     getComparableBenchmarkMetrics,
+    setTrackingPaused,
   } = useHybridFaceDetection({
-    primaryIntervalMs: 100,
-    yoloIntervalMs: 1200,
-    lookingAwayThresholdMs: 3000
+    runtimeConfig: trackingConfigRef.current,
+    lookingAwayThresholdMs: 3000,
   })
+
+  usePageVisibility(
+    () => {
+      if (trackingConfigRef.current.pauseWhenHidden) {
+        setTrackingPaused(true)
+        toast('แท็บถูกซ่อน — หยุดตรวจจับชั่วคราว', { icon: '⚠️', duration: 4000 })
+      }
+    },
+    () => {
+      if (trackingConfigRef.current.pauseWhenHidden) {
+        setTrackingPaused(false)
+        toast.success('กลับมาที่แท็บแล้ว — ดำเนินการตรวจจับต่อ')
+      }
+    }
+  )
 
   // Ref สำหรับเก็บ violations ล่าสุดเพื่อไม่ให้ callback re-trigger
   const violationsRef = useRef(violations)
@@ -130,13 +151,23 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     const videoWidth = video.videoWidth || 640
     const videoHeight = video.videoHeight || 480
 
-    // 1. Draw MediaPipe 468-point Sci-Fi Mesh (🟢 Green)
+    // 1. Draw MediaPipe Sci-Fi Mesh (tier-gated density)
     if (mediaPipeData && mediaPipeData.isDetected && mediaPipeData.landmarks) {
-      drawSciFiFaceMesh(ctx, mediaPipeData.landmarks, video, vw, vh, mediaPipeData.orientation.isLookingAway)
+      drawSciFiFaceMesh(
+        ctx,
+        mediaPipeData.landmarks,
+        video,
+        vw,
+        vh,
+        mediaPipeData.orientation.isLookingAway,
+        trackingConfigRef.current.overlayMode
+      )
     }
 
+    const showEngineOverlays = trackingConfigRef.current.showEngineOverlays
+
     // 2. Draw YOLOv8-Face Bounding Box & 5 Keypoints (🔵 Blue Box + 🔴 Red Keypoints)
-    if (yoloMultiFaceData) {
+    if (showEngineOverlays && yoloMultiFaceData) {
       if (yoloMultiFaceData.primaryBox) {
         const b = yoloMultiFaceData.primaryBox
         const bx = (b.x / videoWidth) * scaleX + offsetX
@@ -192,7 +223,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
 
     // 3. Draw Dlib 68-Point Landmarks (🟠 Amber / Orange Dots)
-    if (dlibData && dlibData.isDetected && dlibData.landmarks68) {
+    if (showEngineOverlays && dlibData && dlibData.isDetected && dlibData.landmarks68) {
       ctx.fillStyle = '#F59E0B'
       dlibData.landmarks68.forEach(pt => {
         const px = (pt.x / videoWidth) * scaleX + offsetX
@@ -203,8 +234,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       })
     }
 
-    // 4. Draw OpenFace 3D Gaze Vector & Action Units Target (🟣 Purple Line & Circle)
-    if (openFaceData && openFaceData.isDetected) {
+    // 4. Draw OpenFace 3D Gaze Vector (🟣 Purple Line & Circle)
+    if (showEngineOverlays && openFaceData && openFaceData.isDetected) {
       const fc = openFaceData.faceCenter ? {
         x: (openFaceData.faceCenter.x / videoWidth) * scaleX + offsetX,
         y: (openFaceData.faceCenter.y / videoHeight) * scaleY + offsetY
@@ -703,19 +734,19 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
           if (stats) {
             benchmarkSyncCounterRef.current += 1
-            const includeBenchmark = benchmarkSyncCounterRef.current % BENCHMARK_SYNC_EVERY_N === 0
+            const includeBenchmark = benchmarkSyncCounterRef.current % benchmarkSyncEveryN === 0
             saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true, includeBenchmark)
               .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
               .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
           }
         }
-      }, 15000) // ทุก 15 วินาที
+      }, ORIENTATION_SYNC_MS)
     }
 
     return () => {
       if (syncInterval) clearInterval(syncInterval)
     }
-  }, [isActive, isRecording, currentSessionId, getCurrentStats, getOrientationHistory, getFaceDetectionLossStats, getFaceDetectionLossEvents, saveOrientationData])
+  }, [isActive, isRecording, currentSessionId, getCurrentStats, getOrientationHistory, getFaceDetectionLossStats, getFaceDetectionLossEvents, saveOrientationData, benchmarkSyncEveryN])
 
   // 🛡️ ดักจับเหตุการณ์ปิดแท็บ, ย้ายหน้า, ซ่อนแอป (beforeunload, pagehide)
   useEffect(() => {
@@ -759,6 +790,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         sessionId={currentSessionId}
         participantCode={participantCode}
         experimentPhase={experimentPhase}
+        trackingConfig={trackingConfigRef.current}
         mediaPipeData={mediaPipeData}
         yoloData={yoloMultiFaceData}
         dlibData={dlibData}

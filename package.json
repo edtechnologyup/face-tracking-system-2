@@ -14,6 +14,7 @@
     "qa:regression": "vitest run src/lib/__tests__/behavior-rule-labeler.test.ts",
     "lab:monitor": "tsx scripts/lab-monitor.ts",
     "lab:monitor:full": "tsx scripts/lab-monitor.ts --browser --docker openface",
+    "load-test:90": "tsx scripts/load-test-90-users.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

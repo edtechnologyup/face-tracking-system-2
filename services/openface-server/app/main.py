@@ -1,6 +1,7 @@
 """OpenFace 3.0 HTTP service for Phase 4 remote AU + confidence."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import os
@@ -9,8 +10,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.inference import analyze_jpeg_bytes, device_name, load_models
+from app.queue import MAX_CONCURRENT
 
 app = FastAPI(title="OpenFace Server", version="3.0.0")
+
+_inference_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 
 
 class AnalyzeRequest(BaseModel):
@@ -61,7 +65,9 @@ def analyze(body: AnalyzeRequest, _: None = Depends(verify_api_key)):
         raise HTTPException(status_code=413, detail="Image too large (max ~6MB)")
 
     try:
-        return analyze_jpeg_bytes(image_bytes)
+        async with _inference_semaphore:
+            result = await asyncio.to_thread(analyze_jpeg_bytes, image_bytes)
+        return result
     except RuntimeError as err:
         raise HTTPException(status_code=503, detail=str(err)) from err
     except ValueError as err:

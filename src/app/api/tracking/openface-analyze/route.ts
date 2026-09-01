@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limiter';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
 export async function POST(request: NextRequest) {
+  const clientKey =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    request.headers.get('x-real-ip') ??
+    'anonymous';
+
+  const { allowed } = await checkRateLimit({
+    key: `openface:${clientKey}`,
+    ...RATE_LIMITS.openfaceAnalyze,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+  }
+
   const serviceUrl = process.env.OPENFACE_SERVICE_URL;
   if (!serviceUrl) {
     return NextResponse.json(

@@ -8,7 +8,12 @@ import {
 } from '@/lib/behavior-rule-labeler'
 import { type NaturalReadingState } from '@/lib/natural-reading-detector'
 import { extractEyeOpennessFromBlendshapes } from '@/lib/blendshape-action-units'
-import { buildBehaviorFeatureProvenance } from '@/lib/feature-provenance'
+import { buildBehaviorFeatureProvenance, slimFeatureProvenance } from '@/lib/feature-provenance'
+import {
+  buildTrackingRuntimeConfig,
+  isResearchEligible,
+  type TrackingRuntimeConfig,
+} from '@/lib/tracking-profile'
 import {
   CURRENT_FEATURE_SCHEMA_VERSION,
   CURRENT_PIPELINE_VERSION,
@@ -53,9 +58,6 @@ import {
 } from '@/lib/behavior-log-gaze-policy';
 
 const HEAD_ROLL_SMOOTH_WINDOW = 5;
-// Capacity tuning for ~80 concurrent users: 2Hz sampling, batch flush every 4s
-const SAMPLE_INTERVAL_MS = 500;
-const SAMPLE_RATE_HZ = Math.round(1000 / SAMPLE_INTERVAL_MS);
 const SYNC_BATCH_SIZE = 8;
 const RETRY_BUFFER_MAX = 300;
 
@@ -98,6 +100,7 @@ export interface BehaviorFeatureSyncProps {
   dlibData: any
   openFaceData: any
   l2csGazeData: any
+  trackingConfig?: TrackingRuntimeConfig
 }
 
 export function BehaviorFeatureSync({
@@ -110,7 +113,16 @@ export function BehaviorFeatureSync({
   l2csGazeData,
   participantCode,
   experimentPhase = DEFAULT_EXPERIMENT_PHASE,
+  trackingConfig: trackingConfigProp,
 }: BehaviorFeatureSyncProps) {
+  const trackingConfigRef = useRef<TrackingRuntimeConfig>(
+    trackingConfigProp ?? buildTrackingRuntimeConfig()
+  )
+  if (trackingConfigProp) {
+    trackingConfigRef.current = trackingConfigProp
+  }
+  const sampleIntervalMs = trackingConfigRef.current.sampleIntervalMs
+  const sampleRateHz = trackingConfigRef.current.sampleRateHz
   const logBufferRef = useRef<any[]>([])
   const sampleIndexRef = useRef<number>(0)
   const sessionStartTimeRef = useRef<number>(Date.now())
@@ -164,7 +176,7 @@ export function BehaviorFeatureSync({
     if (!isActive || !sessionId) return
 
     const now = Date.now()
-    if (now - lastSampleTimeRef.current < SAMPLE_INTERVAL_MS) return
+    if (now - lastSampleTimeRef.current < sampleIntervalMs) return
     lastSampleTimeRef.current = now
 
     const videoEl = document.querySelector('video') as HTMLVideoElement | null
@@ -414,11 +426,22 @@ export function BehaviorFeatureSync({
       cameraHeight: null,
       detectionFps: null,
       cameraStreamFps: null,
-      sampleRateHz: SAMPLE_RATE_HZ,
+      sampleRateHz: sampleRateHz,
+      deviceTier: trackingConfigRef.current.tier,
+      trackingProfile: trackingConfigRef.current.profile,
+      userAgent: trackingConfigRef.current.userAgent,
+      researchEligible: isResearchEligible({
+        profile: trackingConfigRef.current.profile,
+        tier: trackingConfigRef.current.tier,
+        isValid,
+        experimentPhase: resolvedExperimentPhase,
+      }),
       isValid,
       invalidReason,
       pipelineVersion: CURRENT_PIPELINE_VERSION,
-      featureProvenance: buildBehaviorFeatureProvenance({
+    }
+
+    const fullProvenance = buildBehaviorFeatureProvenance({
         headPoseSource,
         yoloStaleMs,
         yoloDetected: !!yoloData?.isDetected,
@@ -461,8 +484,12 @@ export function BehaviorFeatureSync({
         faceConfidenceSource: faceConfidenceResult.source,
         gazeSource: gazeFields.gazeSource,
         perEyeGazeVectorSource: gazeFields.perEyeGazeVectorSource,
-      }),
-    }
+    })
+    const provenanceEveryN = trackingConfigRef.current.provenanceFullEveryN
+    logEntry.featureProvenance =
+      sampleIndexRef.current % provenanceEveryN === 0
+        ? fullProvenance
+        : slimFeatureProvenance(fullProvenance)
 
     if (faceDetected) {
       if (hasGazeValidPhase(computedValidPhases)) {
@@ -511,7 +538,7 @@ export function BehaviorFeatureSync({
         currentFpsRef.current > 0 ? Math.round(currentFpsRef.current) : null;
       logEntry.cameraStreamFps =
         streamFps != null && Number.isFinite(streamFps) ? Math.round(streamFps) : null;
-      logEntry.sampleRateHz = SAMPLE_RATE_HZ;
+      logEntry.sampleRateHz = sampleRateHz;
     } catch {}
 
     const fingerprint = buildLogFingerprint(logEntry);
@@ -540,7 +567,7 @@ export function BehaviorFeatureSync({
         logBufferRef.current = [...logsToSend, ...logBufferRef.current].slice(0, RETRY_BUFFER_MAX)
       })
     }
-  }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData, l2csGazeData, participantCode, experimentPhase])
+  }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData, l2csGazeData, participantCode, experimentPhase, sampleIntervalMs, sampleRateHz])
 
   // Sync on unmount or stop
   useEffect(() => {

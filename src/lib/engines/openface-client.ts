@@ -1,4 +1,5 @@
 import type { OpenFaceActionUnits, OpenFaceDetectionResult } from '@/lib/engines/openface-detector';
+import { enqueueOpenFaceRequest } from '@/lib/engines/openface-queue';
 
 export interface OpenFaceRemoteAnalyzeResponse {
   isDetected: boolean;
@@ -15,27 +16,29 @@ export interface OpenFaceRemoteAnalyzeResponse {
 export async function analyzeOpenFaceRemote(
   imageBase64: string
 ): Promise<OpenFaceRemoteAnalyzeResponse | null> {
-  try {
-    const t0 = performance.now();
-    const res = await fetch('/api/tracking/openface-analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64 }),
-    });
-    const clientRoundTripMs = Number((performance.now() - t0).toFixed(1));
+  return enqueueOpenFaceRequest(async () => {
+    try {
+      const t0 = performance.now();
+      const res = await fetch('/api/tracking/openface-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64 }),
+      });
+      const clientRoundTripMs = Number((performance.now() - t0).toFixed(1));
 
-    if (res.status === 503) return null;
-    if (!res.ok) {
-      console.warn('OpenFace remote analyze failed:', res.status, await res.text());
+      if (res.status === 503) return null;
+      if (!res.ok) {
+        console.warn('OpenFace remote analyze failed:', res.status, await res.text());
+        return null;
+      }
+
+      const payload = (await res.json()) as OpenFaceRemoteAnalyzeResponse;
+      return { ...payload, clientRoundTripMs };
+    } catch (err) {
+      console.warn('OpenFace remote analyze error:', err);
       return null;
     }
-
-    const payload = (await res.json()) as OpenFaceRemoteAnalyzeResponse;
-    return { ...payload, clientRoundTripMs };
-  } catch (err) {
-    console.warn('OpenFace remote analyze error:', err);
-    return null;
-  }
+  });
 }
 
 export function mapRemoteToOpenFaceResult(

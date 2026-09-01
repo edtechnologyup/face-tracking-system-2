@@ -351,7 +351,12 @@ model BehaviorFeatureLog {
   sharpnessScore Float?
   occlusionScore Float?
 
-  // DEVICE
+  // DEVICE & RUNTIME
+  deviceTier        String?
+  trackingProfile   String?
+  userAgent         String?
+  /** true = row eligible for research export (valid, not warmup, tier/profile OK) */
+  researchEligible  Boolean?
   cameraWidth       Int?
   cameraHeight      Int?
   /** FPS ของ detection loop (~10 Hz MediaPipe) */

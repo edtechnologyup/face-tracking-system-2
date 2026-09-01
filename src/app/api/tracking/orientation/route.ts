@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import jwt from 'jsonwebtoken'
-import { rateLimit } from '@/lib/utils/rate-limiter'
+import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limiter'
+import { persistSyncedBenchmarkLogs } from '@/lib/benchmark-log-persist'
 import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
-import {
-  benchmarkMetricToDbBase,
-  type MultiEngineBenchmarkPayload,
-} from '@/lib/engine-benchmark'
+import type { MultiEngineBenchmarkPayload } from '@/lib/engine-benchmark'
 
 // Interface สำหรับ request body
 interface OrientationEvent {
@@ -88,7 +86,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Rate limiting: จำกัด 10 requests per user, refill 1 token/s (ปกติเรียกทุก 15 วินาที)
-    const { allowed } = rateLimit(`orientation:${userId}`, 10, 1)
+    const { allowed } = await checkRateLimit({
+      key: `orientation:${userId}`,
+      ...RATE_LIMITS.orientation,
+    })
     if (!allowed) {
       return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
     }
@@ -220,70 +221,13 @@ export async function POST(request: NextRequest) {
 
     // บันทึกลงตารางโมเดลแยกแต่ละตัว — เฉพาะ synced snapshot (4 engine, frame เดียวกัน)
     if (benchmarkMetrics) {
-      const bm = benchmarkMetrics
-      const snapshotId = bm.snapshotId
-      if (!snapshotId) {
-        console.warn('[orientation] benchmarkMetrics missing snapshotId — skip model logs')
-      } else if (!bm.snapshotSynced) {
+      const persistResult = await persistSyncedBenchmarkLogs(sessionId, benchmarkMetrics)
+      if (!persistResult.persisted && !persistResult.skippedDuplicate) {
         console.warn(
           '[orientation] benchmark snapshot not synced across 4 engines — skip model logs (need OpenFace server)'
         )
-      } else {
-        const snapshotSynced = true
-        const benchmarkPromises = []
-
-        if (bm.mediapipe) {
-          benchmarkPromises.push(
-            prisma.mediaPipeLog.create({
-              data: {
-                sessionId,
-                ...benchmarkMetricToDbBase(bm.mediapipe, snapshotId, snapshotSynced),
-              },
-            })
-          )
-        }
-
-        if (bm.yolov8) {
-          benchmarkPromises.push(
-            prisma.yolov8Log.create({
-              data: {
-                sessionId,
-                ...benchmarkMetricToDbBase(bm.yolov8, snapshotId, snapshotSynced),
-              },
-            })
-          )
-        }
-
-        if (bm.dlib) {
-          benchmarkPromises.push(
-            prisma.dlibLog.create({
-              data: {
-                sessionId,
-                ...benchmarkMetricToDbBase(bm.dlib, snapshotId, snapshotSynced),
-              },
-            })
-          )
-        }
-
-        if (bm.openface) {
-          benchmarkPromises.push(
-            prisma.openFaceLog.create({
-              data: {
-                sessionId,
-                ...benchmarkMetricToDbBase(bm.openface, snapshotId, snapshotSynced),
-                serverLatencyMs: bm.openface.serverLatencyMs ?? null,
-                resultAgeMs:
-                  bm.openface.resultAgeMs != null
-                    ? Math.round(bm.openface.resultAgeMs)
-                    : null,
-              },
-            })
-          )
-        }
-
-        if (benchmarkPromises.length > 0) {
-          await Promise.all(benchmarkPromises)
-        }
+      } else if (persistResult.skippedDuplicate) {
+        console.log('[orientation] skipped duplicate benchmarkSnapshotId', persistResult.snapshotId)
       }
     }
 
