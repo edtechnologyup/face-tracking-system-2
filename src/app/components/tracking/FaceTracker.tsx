@@ -8,6 +8,14 @@ import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
 import { BehaviorFeatureSync } from "./BehaviorFeatureSync"
 import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
+import {
+  formatBenchmarkConfidence,
+  formatBenchmarkFps,
+  formatBenchmarkMemory,
+  formatLandmarksColumn,
+  formatComparableInferenceMs,
+  formatComparableScore,
+} from '@/lib/engine-benchmark'
 import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
 import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
 import toast from 'react-hot-toast'
@@ -16,6 +24,8 @@ interface FaceTrackerProps {
   onTrackingStop: () => void
   sessionName?: string
   participantCode?: string
+  /** ช่วงการทดลอง — default NATURAL_TASK */
+  experimentPhase?: import('@/lib/experiment-phase').ExperimentPhase
 }
 
 interface AnalyticsResult {
@@ -32,7 +42,7 @@ interface AnalyticsResult {
   }
 }
 
-export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ', participantCode }: FaceTrackerProps) {
+export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ', participantCode, experimentPhase }: FaceTrackerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -56,6 +66,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     yoloMultiFaceData,
     dlibData,
     openFaceData,
+    l2csGazeData,
     benchmarkMetrics,
     violations,
     isRecording, 
@@ -70,7 +81,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     getFaceDetectionLossStats,
     getFaceDetectionLossEvents,
     getOrientationHistory,
-    getBenchmarkMetrics
+    getBenchmarkMetrics,
+    captureSyncedBenchmark,
+    getComparableBenchmarkMetrics,
   } = useHybridFaceDetection({
     primaryIntervalMs: 100,
     yoloIntervalMs: 1200,
@@ -456,7 +469,17 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         isActive: false
       }))
 
-      const currentBenchmark = includeBenchmarkMetrics ? getBenchmarkMetrics() : null
+      const currentBenchmark = includeBenchmarkMetrics
+        ? (videoRef.current
+            ? await captureSyncedBenchmark(videoRef.current)
+            : null) ?? getBenchmarkMetrics()
+        : null
+
+      if (includeBenchmarkMetrics && currentBenchmark && !currentBenchmark.snapshotSynced) {
+        console.warn(
+          '[benchmark] Skipping non-synced snapshot — deploy OpenFace server for 4-model comparison'
+        )
+      }
 
       const response = await fetch('/api/tracking/orientation', {
         method: 'POST',
@@ -491,7 +514,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     } finally {
       if (!isKeepAlive) setIsLoading(false)
     }
-  }, [getBenchmarkMetrics])
+  }, [getBenchmarkMetrics, captureSyncedBenchmark])
 
   // หยุดบันทึกและแสดงผลลัพธ์
   const handleStopRecording = useCallback(async () => {
@@ -635,7 +658,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
           faceDetectionLossEvents: faceDetectionLossEvents || [],
           securityViolations: violationsRef.current || [],
-          benchmarkMetrics: getBenchmarkMetrics() || undefined
+          benchmarkMetrics: getComparableBenchmarkMetrics() || undefined
         }),
         keepalive: isKeepAlive
       }).catch(err => console.error('Auto-sync orientation error:', err))
@@ -660,7 +683,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     } catch (err) {
       console.error('Flush session data error:', err)
     }
-  }, [stopRecording, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents, getBenchmarkMetrics])
+  }, [stopRecording, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents, getComparableBenchmarkMetrics])
 
   // 🔄 ระบบ Periodic Auto-Sync บันทึกข้อมูลลง DB อัตโนมัติทุกๆ 15 วินาทีระหว่างการติดตาม
   useEffect(() => {
@@ -735,10 +758,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         isActive={isActive}
         sessionId={currentSessionId}
         participantCode={participantCode}
+        experimentPhase={experimentPhase}
         mediaPipeData={mediaPipeData}
         yoloData={yoloMultiFaceData}
         dlibData={dlibData}
         openFaceData={openFaceData}
+        l2csGazeData={l2csGazeData}
       />
       <div className="p-6">
         {/* Video and Canvas Container with Live Face Count HUD Badge */}
@@ -797,7 +822,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                 <span>⚡ Live Benchmark Matrix (4 AI Models Concurrent System)</span>
               </h3>
               <span className="self-start sm:self-auto text-[11px] sm:text-xs bg-blue-50 text-blue-700 font-medium px-2.5 py-0.5 rounded-full border border-blue-200">
-                เรียลไทม์ 4 โมเดล (MediaPipe + YOLOv8 + Dlib + OpenFace)
+                {benchmarkMetrics.snapshotSynced
+                  ? `synced ${benchmarkMetrics.snapshotId.slice(0, 8)}… · 4 engines · same frame`
+                  : `live preview · รอ synced snapshot (ต้องมี OpenFace server)`}
               </span>
             </div>
 
@@ -808,10 +835,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">โมเดล AI (Engine)</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">สถานะ</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">ความเร็ว (FPS)</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">เวลาประมวลผล (Latency)</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">จุด Landmarks</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">ทรัพยากร (RAM / CPU)</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">ความแม่นยำ (Confidence)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Infer (เทียบได้)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Score (0–1)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Landmarks / Faces</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">JS Heap (tab)</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Confidence (kind)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -823,11 +851,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2">
                       <span className="bg-green-100 text-green-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
                     </td>
-                    <td className="px-3 py-2 font-bold text-green-600">{benchmarkMetrics.mediapipe.fps} FPS</td>
-                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.mediapipe.latencyMs} ms</td>
-                    <td className="px-3 py-2 text-gray-700">468 จุด (3D)</td>
-                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.mediapipe.memoryMb} MB | {benchmarkMetrics.mediapipe.cpuLoadPct}% CPU</td>
-                    <td className="px-3 py-2 font-bold text-green-600">{(benchmarkMetrics.mediapipe.confidence * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-2 font-bold text-green-600">{formatBenchmarkFps(benchmarkMetrics.mediapipe.fps)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.mediapipe.inferenceLatencyMs)}</td>
+                    <td className="px-3 py-2 font-bold text-green-600">{formatComparableScore(benchmarkMetrics.mediapipe.comparableDetectionScore)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.mediapipe)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.mediapipe)}</td>
+                    <td className="px-3 py-2 font-bold text-green-600">{formatBenchmarkConfidence(benchmarkMetrics.mediapipe)}</td>
                   </tr>
                   <tr className="bg-blue-50/20">
                     <td className="px-3 py-2 font-bold text-blue-700 flex items-center gap-1.5">
@@ -837,11 +866,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2">
                       <span className="bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
                     </td>
-                    <td className="px-3 py-2 font-bold text-blue-600">{benchmarkMetrics.yolov8.fps} FPS</td>
-                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.yolov8.latencyMs} ms</td>
-                    <td className="px-3 py-2 text-gray-700">5 จุดหลัก</td>
-                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.yolov8.memoryMb} MB | {benchmarkMetrics.yolov8.cpuLoadPct}% CPU</td>
-                    <td className="px-3 py-2 font-bold text-blue-600">{(benchmarkMetrics.yolov8.confidence * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-2 font-bold text-blue-600">{formatBenchmarkFps(benchmarkMetrics.yolov8.fps)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.yolov8.inferenceLatencyMs)}</td>
+                    <td className="px-3 py-2 font-bold text-blue-600">{formatComparableScore(benchmarkMetrics.yolov8.comparableDetectionScore)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.yolov8)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.yolov8)}</td>
+                    <td className="px-3 py-2 font-bold text-blue-600">{formatBenchmarkConfidence(benchmarkMetrics.yolov8)}</td>
                   </tr>
                   <tr className="bg-amber-50/20">
                     <td className="px-3 py-2 font-bold text-amber-700 flex items-center gap-1.5">
@@ -851,11 +881,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2">
                       <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
                     </td>
-                    <td className="px-3 py-2 font-bold text-amber-600">{benchmarkMetrics.dlib.fps} FPS</td>
-                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.dlib.latencyMs} ms</td>
-                    <td className="px-3 py-2 text-gray-700">68 จุด (2D)</td>
-                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.dlib.memoryMb} MB | {benchmarkMetrics.dlib.cpuLoadPct}% CPU</td>
-                    <td className="px-3 py-2 font-bold text-amber-600">{(benchmarkMetrics.dlib.confidence * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-2 font-bold text-amber-600">{formatBenchmarkFps(benchmarkMetrics.dlib.fps)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.dlib.inferenceLatencyMs)}</td>
+                    <td className="px-3 py-2 font-bold text-amber-600">{formatComparableScore(benchmarkMetrics.dlib.comparableDetectionScore)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.dlib)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.dlib)}</td>
+                    <td className="px-3 py-2 font-bold text-amber-600">{formatBenchmarkConfidence(benchmarkMetrics.dlib)}</td>
                   </tr>
                   <tr className="bg-purple-50/20">
                     <td className="px-3 py-2 font-bold text-purple-700 flex items-center gap-1.5">
@@ -865,11 +896,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2">
                       <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
                     </td>
-                    <td className="px-3 py-2 font-bold text-purple-600">{benchmarkMetrics.openface.fps} FPS</td>
-                    <td className="px-3 py-2 text-gray-700">{benchmarkMetrics.openface.latencyMs} ms</td>
-                    <td className="px-3 py-2 text-gray-700">68+ จุด</td>
-                    <td className="px-3 py-2 text-gray-600">{benchmarkMetrics.openface.memoryMb} MB | {benchmarkMetrics.openface.cpuLoadPct}% CPU</td>
-                    <td className="px-3 py-2 font-bold text-purple-600">{(benchmarkMetrics.openface.confidence * 100).toFixed(1)}%</td>
+                    <td className="px-3 py-2 font-bold text-purple-600">{formatBenchmarkFps(benchmarkMetrics.openface.fps)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.openface.inferenceLatencyMs)}</td>
+                    <td className="px-3 py-2 font-bold text-purple-600">{formatComparableScore(benchmarkMetrics.openface.comparableDetectionScore)}</td>
+                    <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.openface)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.openface)}</td>
+                    <td className="px-3 py-2 font-bold text-purple-600">{formatBenchmarkConfidence(benchmarkMetrics.openface)}</td>
                   </tr>
                 </tbody>
               </table>

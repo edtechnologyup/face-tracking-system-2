@@ -1,6 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { rateLimit } from '@/lib/utils/rate-limiter'
+import { validateBehaviorLogBatch } from '@/lib/pipeline-qa'
+import { aggregateScenarioCounts } from '@/lib/behavior-rule-labeler'
+
+export async function GET(request: NextRequest) {
+  try {
+    const sessionId = request.nextUrl.searchParams.get('sessionId')
+    if (!sessionId) {
+      return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
+    }
+
+    const logs = await prisma.behaviorFeatureLog.findMany({
+      where: { sessionId },
+      select: { scenario: true, isValid: true, invalidReason: true, timestamp: true },
+      orderBy: { timestamp: 'asc' },
+    })
+
+    const scenarios = logs.map((l) => l.scenario)
+    const scenarioCounts = aggregateScenarioCounts(scenarios)
+    const validCount = logs.filter((l) => l.isValid).length
+    const invalidReasons = aggregateScenarioCounts(
+      logs.filter((l) => !l.isValid).map((l) => l.invalidReason)
+    )
+
+    return NextResponse.json({
+      success: true,
+      sessionId,
+      totalSamples: logs.length,
+      validCount,
+      invalidCount: logs.length - validCount,
+      scenarioCounts,
+      invalidReasonCounts: invalidReasons,
+    })
+  } catch (error: unknown) {
+    console.error('Error fetching behavior analytics:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch behavior analytics' },
+      { status: 500 }
+    )
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,6 +71,11 @@ export async function POST(request: NextRequest) {
     const MAX_BATCH_SIZE = 100
     const safeLogs = logs.slice(0, MAX_BATCH_SIZE)
 
+    const qaReport = validateBehaviorLogBatch(safeLogs)
+    if (!qaReport.valid) {
+      console.warn('[behavior-features QA]', qaReport.summary, qaReport.issues.slice(0, 5))
+    }
+
     // Prepare data for batch insert
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const logsData = safeLogs.map((log: any) => ({
@@ -41,7 +86,8 @@ export async function POST(request: NextRequest) {
       sampleIndex: log.sampleIndex ?? 0,
       scenario: log.scenario ?? null,
       
-      phase: Array.isArray(log.phase) ? log.phase : (log.phase ? [log.phase] : []),
+      phase: log.phase ?? 'NATURAL_TASK',
+      validPhases: Array.isArray(log.validPhases) ? log.validPhases : [],
       
       faceDetected: Boolean(log.faceDetected),
       faceCount: log.faceCount ?? null,
@@ -85,17 +131,20 @@ export async function POST(request: NextRequest) {
       
       brightnessMean: log.brightnessMean ?? null,
       contrastScore: log.contrastScore ?? null,
-      blurScore: log.blurScore ?? null,
+      sharpnessScore: log.sharpnessScore ?? log.blurScore ?? null,
       occlusionScore: log.occlusionScore ?? null,
       
       cameraWidth: log.cameraWidth ?? null,
       cameraHeight: log.cameraHeight ?? null,
-      cameraFps: log.cameraFps ?? null,
+      detectionFps: log.detectionFps ?? log.cameraFps ?? null,
+      cameraStreamFps: log.cameraStreamFps ?? null,
+      sampleRateHz: log.sampleRateHz ?? null,
       
       isValid: log.isValid !== undefined ? Boolean(log.isValid) : true,
       invalidReason: log.invalidReason ?? null,
       pipelineVersion: log.pipelineVersion ?? null,
       featureSchemaVersion: log.featureSchemaVersion ?? null,
+      featureProvenance: log.featureProvenance ? JSON.parse(JSON.stringify(log.featureProvenance)) : null,
     }))
 
     // Use createMany to insert all logs at once for maximum performance
@@ -106,7 +155,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: `Successfully saved ${result.count} behavior feature logs`,
-      count: result.count
+      count: result.count,
+      qa: {
+        valid: qaReport.valid,
+        errorCount: qaReport.summary.errorCount,
+        warnCount: qaReport.summary.warnCount,
+      },
     })
 
   } catch (error: unknown) {

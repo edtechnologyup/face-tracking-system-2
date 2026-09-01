@@ -4,6 +4,12 @@ import { useState } from 'react'
 import { Card } from '@/app/components/ui/Card'
 import { Button } from '@/app/components/ui/Button'
 import { formatThaiDateTime } from '@/lib/utils/datetime'
+import {
+  CONFIDENCE_KIND_LABELS,
+  formatBenchmarkFps,
+  formatComparableInferenceMs,
+  formatComparableScore,
+} from '@/lib/engine-benchmark'
 
 interface TrackingLog {
   id: string
@@ -361,28 +367,36 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
         </div>
       </Card>
 
-      {/* Live Benchmark Matrix Card (If Recorded in DB) */}
+      {/* Synced Benchmark Matrix (same-frame, comparable across 4 engines) */}
       {(() => {
-        const mpLog = sessionDetail.mediapipeLogs?.[sessionDetail.mediapipeLogs.length - 1] as Record<string, unknown> | undefined
-        const yoloLog = sessionDetail.yolov8Logs?.[sessionDetail.yolov8Logs.length - 1] as Record<string, unknown> | undefined
-        const dlibLog = sessionDetail.dlibLogs?.[sessionDetail.dlibLogs.length - 1] as Record<string, unknown> | undefined
-        const ofLog = sessionDetail.openFaceLogs?.[sessionDetail.openFaceLogs.length - 1] as Record<string, unknown> | undefined
+        type LogRow = Record<string, unknown>
+        const mpLogs = (sessionDetail.mediapipeLogs ?? []) as LogRow[]
+        const syncedMp = [...mpLogs]
+          .filter((r) => r.snapshotSynced === true && r.benchmarkSnapshotId)
+          .sort((a, b) => new Date(String(b.measuredAt ?? b.timestamp)).getTime() - new Date(String(a.measuredAt ?? a.timestamp)).getTime())
 
-        if (!mpLog && !yoloLog && !dlibLog && !ofLog) return null
+        const latestSnapshotId = syncedMp[0]?.benchmarkSnapshotId as string | undefined
+        if (!latestSnapshotId) return null
 
-        const mp = mpLog
-        const yolo = yoloLog
-        const dlib = dlibLog
-        const openface = ofLog
+        const pick = (rows: LogRow[] | undefined) =>
+          rows?.find((r) => r.benchmarkSnapshotId === latestSnapshotId && r.snapshotSynced === true)
+
+        const mp = pick(mpLogs)
+        const yolo = pick(sessionDetail.yolov8Logs as LogRow[] | undefined)
+        const dlib = pick(sessionDetail.dlibLogs as LogRow[] | undefined)
+        const openface = pick(sessionDetail.openFaceLogs as LogRow[] | undefined)
+
+        if (!mp && !yolo && !dlib && !openface) return null
 
         return (
           <Card className="p-6 bg-white border border-indigo-200 shadow-sm">
             <h3 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
               <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg text-base">⚡</span>
-              <span>ตารางสรุปบันทึกประสิทธิภาพ 4 เครื่องมือ (Recorded Live Benchmark Matrix)</span>
+              <span>Benchmark 4 โมเดล (Synced · เทียบกันได้)</span>
             </h3>
             <p className="text-xs text-gray-500 mb-4">
-              ข้อมูลประสิทธิภาพและทรัพยากรของทั้ง 4 AI Models ที่ถูกบันทึกลงฐานข้อมูลระหว่างการตรวจจับใบหน้าในเซสชันนี้
+              snapshot <code className="bg-gray-100 px-1 rounded">{String(latestSnapshotId).slice(0, 8)}…</code>
+              · frame เดียวกัน · ใช้ <b>inferenceLatencyMs</b> และ <b>comparableDetectionScore</b> เปรียบข้าม engine
             </p>
 
             <div className="overflow-x-auto">
@@ -390,52 +404,68 @@ export function SessionDetail({ sessionDetail, loading, onBackClick }: SessionDe
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-gray-700">โมเดล AI (Engine)</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-700">ความเร็ว (FPS)</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-700">เวลาประมวลผล (Latency)</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-700">จุด Landmarks</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-700">การใช้ทรัพยากร (RAM / CPU)</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-700">ความแม่นยำ (Confidence)</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">FPS</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">Infer (เทียบได้)</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">Score (0–1)</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">Detected</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-700">Raw confidence (kind)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {mp && (
                     <tr className="bg-green-50/30">
-                      <td className="px-4 py-3 font-bold text-green-700">1. MediaPipe (468 3D Mesh)</td>
-                      <td className="px-4 py-3 font-bold text-green-600">{String(mp.fps)} FPS</td>
-                      <td className="px-4 py-3 text-gray-800">{String(mp.latencyMs)} ms</td>
-                      <td className="px-4 py-3 text-gray-800">468 จุด (3D)</td>
-                      <td className="px-4 py-3 text-gray-600">{String(mp.memoryMb)} MB | {String(mp.cpuLoadPct)}% CPU</td>
-                      <td className="px-4 py-3 font-bold text-green-600">{(Number(mp.confidence || 0) * 100).toFixed(1)}%</td>
+                      <td className="px-4 py-3 font-bold text-green-700">1. MediaPipe</td>
+                      <td className="px-4 py-3 font-bold text-green-600">{formatBenchmarkFps(Number(mp.fps))}</td>
+                      <td className="px-4 py-3 text-gray-800">{formatComparableInferenceMs(Number(mp.inferenceLatencyMs))}</td>
+                      <td className="px-4 py-3 font-bold text-green-600">{formatComparableScore(Number(mp.comparableDetectionScore))}</td>
+                      <td className="px-4 py-3">{mp.isDetected ? '✓' : '—'}</td>
+                      <td className="px-4 py-3 text-gray-700">
+                        {mp.confidence != null
+                          ? `${(Number(mp.confidence) * 100).toFixed(1)}% (${CONFIDENCE_KIND_LABELS[(mp.confidenceKind as keyof typeof CONFIDENCE_KIND_LABELS) ?? 'trackingQuality']})`
+                          : '—'}
+                      </td>
                     </tr>
                   )}
                   {yolo && (
                     <tr className="bg-blue-50/30">
-                      <td className="px-4 py-3 font-bold text-blue-700">2. YOLOv8-Face (Bounding Box)</td>
-                      <td className="px-4 py-3 font-bold text-blue-600">{String(yolo.fps)} FPS</td>
-                      <td className="px-4 py-3 text-gray-800">{String(yolo.latencyMs)} ms</td>
-                      <td className="px-4 py-3 text-gray-800">5 จุดหลัก</td>
-                      <td className="px-4 py-3 text-gray-600">{String(yolo.memoryMb)} MB | {String(yolo.cpuLoadPct)}% CPU</td>
-                      <td className="px-4 py-3 font-bold text-blue-600">{(Number(yolo.confidence || 0) * 100).toFixed(1)}%</td>
+                      <td className="px-4 py-3 font-bold text-blue-700">2. YOLOv8-Face</td>
+                      <td className="px-4 py-3 font-bold text-blue-600">{formatBenchmarkFps(Number(yolo.fps))}</td>
+                      <td className="px-4 py-3 text-gray-800">{formatComparableInferenceMs(Number(yolo.inferenceLatencyMs))}</td>
+                      <td className="px-4 py-3 font-bold text-blue-600">{formatComparableScore(Number(yolo.comparableDetectionScore))}</td>
+                      <td className="px-4 py-3">{yolo.isDetected ? '✓' : '—'}</td>
+                      <td className="px-4 py-3 text-gray-700">
+                        {yolo.confidence != null
+                          ? `${(Number(yolo.confidence) * 100).toFixed(1)}% (${CONFIDENCE_KIND_LABELS[(yolo.confidenceKind as keyof typeof CONFIDENCE_KIND_LABELS) ?? 'faceBoxScore']})`
+                          : '—'}
+                      </td>
                     </tr>
                   )}
                   {dlib && (
                     <tr className="bg-amber-50/30">
-                      <td className="px-4 py-3 font-bold text-amber-700">3. Dlib (68-Point Landmark)</td>
-                      <td className="px-4 py-3 font-bold text-amber-600">{String(dlib.fps)} FPS</td>
-                      <td className="px-4 py-3 text-gray-800">{String(dlib.latencyMs)} ms</td>
-                      <td className="px-4 py-3 text-gray-800">68 จุด (2D)</td>
-                      <td className="px-4 py-3 text-gray-600">{String(dlib.memoryMb)} MB | {String(dlib.cpuLoadPct)}% CPU</td>
-                      <td className="px-4 py-3 font-bold text-amber-600">{(Number(dlib.confidence || 0) * 100).toFixed(1)}%</td>
+                      <td className="px-4 py-3 font-bold text-amber-700">3. Dlib / face-api</td>
+                      <td className="px-4 py-3 font-bold text-amber-600">{formatBenchmarkFps(Number(dlib.fps))}</td>
+                      <td className="px-4 py-3 text-gray-800">{formatComparableInferenceMs(Number(dlib.inferenceLatencyMs))}</td>
+                      <td className="px-4 py-3 font-bold text-amber-600">{formatComparableScore(Number(dlib.comparableDetectionScore))}</td>
+                      <td className="px-4 py-3">{dlib.isDetected ? '✓' : '—'}</td>
+                      <td className="px-4 py-3 text-gray-700">
+                        {dlib.confidence != null
+                          ? `${(Number(dlib.confidence) * 100).toFixed(1)}% (${CONFIDENCE_KIND_LABELS[(dlib.confidenceKind as keyof typeof CONFIDENCE_KIND_LABELS) ?? 'detectorScore']})`
+                          : '—'}
+                      </td>
                     </tr>
                   )}
                   {openface && (
                     <tr className="bg-purple-50/30">
-                      <td className="px-4 py-3 font-bold text-purple-700">4. OpenFace (Action Units & Gaze)</td>
-                      <td className="px-4 py-3 font-bold text-purple-600">{String(openface.fps)} FPS</td>
-                      <td className="px-4 py-3 text-gray-800">{String(openface.latencyMs)} ms</td>
-                      <td className="px-4 py-3 text-gray-800">68+ จุด</td>
-                      <td className="px-4 py-3 text-gray-600">{String(openface.memoryMb)} MB | {String(openface.cpuLoadPct)}% CPU</td>
-                      <td className="px-4 py-3 font-bold text-purple-600">{(Number(openface.confidence || 0) * 100).toFixed(1)}%</td>
+                      <td className="px-4 py-3 font-bold text-purple-700">4. OpenFace 3.0</td>
+                      <td className="px-4 py-3 font-bold text-purple-600">{formatBenchmarkFps(Number(openface.fps))}</td>
+                      <td className="px-4 py-3 text-gray-800">{formatComparableInferenceMs(Number(openface.inferenceLatencyMs))}</td>
+                      <td className="px-4 py-3 font-bold text-purple-600">{formatComparableScore(Number(openface.comparableDetectionScore))}</td>
+                      <td className="px-4 py-3">{openface.isDetected ? '✓' : '—'}</td>
+                      <td className="px-4 py-3 text-gray-700">
+                        {openface.confidence != null
+                          ? `${(Number(openface.confidence) * 100).toFixed(1)}% (${CONFIDENCE_KIND_LABELS[(openface.confidenceKind as keyof typeof CONFIDENCE_KIND_LABELS) ?? 'retinaFaceScore']})`
+                          : '—'}
+                      </td>
                     </tr>
                   )}
                 </tbody>

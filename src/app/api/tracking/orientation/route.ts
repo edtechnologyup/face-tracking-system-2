@@ -4,6 +4,10 @@ import { Prisma } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 import { rateLimit } from '@/lib/utils/rate-limiter'
 import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
+import {
+  benchmarkMetricToDbBase,
+  type MultiEngineBenchmarkPayload,
+} from '@/lib/engine-benchmark'
 
 // Interface สำหรับ request body
 interface OrientationEvent {
@@ -54,7 +58,7 @@ interface OrientationLogRequest {
     reason?: string;
   }>;
   securityViolations?: SecurityViolationItem[];
-  benchmarkMetrics?: Record<string, unknown>;
+  benchmarkMetrics?: MultiEngineBenchmarkPayload;
 }
 
 // CBMI Parameter Adjustment Guide: ข้าม event ที่มีระยะเวลาสั้นกว่า SUSTAINED_DURATION_SEC ก่อนบันทึกลงฐานข้อมูล
@@ -214,83 +218,72 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // บันทึกลงตารางโมเดลแยกแต่ละตัว (MediaPipe, YOLOv8, Dlib, OpenFace)
-    // ใช้ Promise.all เพื่อส่ง queries พร้อมกัน (1 round-trip แทน 4 sequential round-trips)
+    // บันทึกลงตารางโมเดลแยกแต่ละตัว — เฉพาะ synced snapshot (4 engine, frame เดียวกัน)
     if (benchmarkMetrics) {
-      const bm = benchmarkMetrics as Record<string, {
-        fps?: number
-        latencyMs?: number
-        landmarksCount?: number
-        memoryMb?: number
-        cpuLoadPct?: number
-        confidence?: number
-        isDetected?: boolean
-      }>
+      const bm = benchmarkMetrics
+      const snapshotId = bm.snapshotId
+      if (!snapshotId) {
+        console.warn('[orientation] benchmarkMetrics missing snapshotId — skip model logs')
+      } else if (!bm.snapshotSynced) {
+        console.warn(
+          '[orientation] benchmark snapshot not synced across 4 engines — skip model logs (need OpenFace server)'
+        )
+      } else {
+        const snapshotSynced = true
+        const benchmarkPromises = []
 
-      const benchmarkPromises = []
+        if (bm.mediapipe) {
+          benchmarkPromises.push(
+            prisma.mediaPipeLog.create({
+              data: {
+                sessionId,
+                ...benchmarkMetricToDbBase(bm.mediapipe, snapshotId, snapshotSynced),
+              },
+            })
+          )
+        }
 
-      if (bm.mediapipe) {
-        benchmarkPromises.push(prisma.mediaPipeLog.create({
-          data: {
-            sessionId,
-            fps: bm.mediapipe.fps,
-            latencyMs: bm.mediapipe.latencyMs,
-            landmarksCount: bm.mediapipe.landmarksCount ?? 468,
-            memoryMb: bm.mediapipe.memoryMb,
-            cpuLoadPct: bm.mediapipe.cpuLoadPct,
-            confidence: bm.mediapipe.confidence,
-            isDetected: bm.mediapipe.isDetected ?? true
-          }
-        }))
-      }
+        if (bm.yolov8) {
+          benchmarkPromises.push(
+            prisma.yolov8Log.create({
+              data: {
+                sessionId,
+                ...benchmarkMetricToDbBase(bm.yolov8, snapshotId, snapshotSynced),
+              },
+            })
+          )
+        }
 
-      if (bm.yolov8) {
-        benchmarkPromises.push(prisma.yolov8Log.create({
-          data: {
-            sessionId,
-            fps: bm.yolov8.fps,
-            latencyMs: bm.yolov8.latencyMs,
-            landmarksCount: bm.yolov8.landmarksCount ?? 5,
-            memoryMb: bm.yolov8.memoryMb,
-            cpuLoadPct: bm.yolov8.cpuLoadPct,
-            confidence: bm.yolov8.confidence,
-            isDetected: bm.yolov8.isDetected ?? true
-          }
-        }))
-      }
+        if (bm.dlib) {
+          benchmarkPromises.push(
+            prisma.dlibLog.create({
+              data: {
+                sessionId,
+                ...benchmarkMetricToDbBase(bm.dlib, snapshotId, snapshotSynced),
+              },
+            })
+          )
+        }
 
-      if (bm.dlib) {
-        benchmarkPromises.push(prisma.dlibLog.create({
-          data: {
-            sessionId,
-            fps: bm.dlib.fps,
-            latencyMs: bm.dlib.latencyMs,
-            landmarksCount: bm.dlib.landmarksCount ?? 68,
-            memoryMb: bm.dlib.memoryMb,
-            cpuLoadPct: bm.dlib.cpuLoadPct,
-            confidence: bm.dlib.confidence,
-            isDetected: bm.dlib.isDetected ?? true
-          }
-        }))
-      }
+        if (bm.openface) {
+          benchmarkPromises.push(
+            prisma.openFaceLog.create({
+              data: {
+                sessionId,
+                ...benchmarkMetricToDbBase(bm.openface, snapshotId, snapshotSynced),
+                serverLatencyMs: bm.openface.serverLatencyMs ?? null,
+                resultAgeMs:
+                  bm.openface.resultAgeMs != null
+                    ? Math.round(bm.openface.resultAgeMs)
+                    : null,
+              },
+            })
+          )
+        }
 
-      if (bm.openface) {
-        benchmarkPromises.push(prisma.openFaceLog.create({
-          data: {
-            sessionId,
-            fps: bm.openface.fps,
-            latencyMs: bm.openface.latencyMs,
-            landmarksCount: bm.openface.landmarksCount ?? 68,
-            memoryMb: bm.openface.memoryMb,
-            cpuLoadPct: bm.openface.cpuLoadPct,
-            confidence: bm.openface.confidence,
-            isDetected: bm.openface.isDetected ?? true
-          }
-        }))
-      }
-
-      if (benchmarkPromises.length > 0) {
-        await Promise.all(benchmarkPromises)
+        if (benchmarkPromises.length > 0) {
+          await Promise.all(benchmarkPromises)
+        }
       }
     }
 

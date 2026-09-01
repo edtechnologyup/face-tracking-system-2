@@ -37,18 +37,18 @@ export function useMultiEngineDetection() {
   const [results, setResults] = useState<MultiEngineResults>({
     mediapipe: { data: null, fps: 0, latencyMs: 0, landmarksCount: 468, memoryMb: 38.5, cpuLoadPct: 30 },
     yolov8: { isDetected: false, confidence: 0, latencyMs: 0, fps: 0, landmarksCount: 5, memoryMb: 48, cpuLoadPct: 25 },
-    dlib: { isDetected: false, landmarks68: [], confidence: 0, latencyMs: 0, fps: 0, landmarksCount: 68, memoryMb: 92, cpuLoadPct: 140 },
+    dlib: { isDetected: false, landmarks68: [], confidence: 0, detectionScore: 0, landmarkQuality: null, latencyMs: 0, fps: 0, landmarksCount: 68, memoryMb: 92, cpuLoadPct: 140, timestamp: 0 },
     openface: {
       isDetected: false,
-      actionUnits: { au01_InnerBrowRaiser: 0, au02_OuterBrowRaiser: 0, au04_BrowLowerer: 0, au12_LipCornerPuller: 0, au26_JawDrop: 0, au45_Blink: 0 },
+      actionUnits: null,
       gazeVector: { x: 0, y: 0, z: -1, eyeContact: false },
       poseAngle: { pitch: 0, yaw: 0, roll: 0 },
-      confidence: 0,
+      confidence: null,
       latencyMs: 0,
       fps: 0,
-      landmarksCount: 68,
-      memoryMb: 340,
-      cpuLoadPct: 310
+      landmarksCount: 0,
+      memoryMb: 0,
+      cpuLoadPct: 0
     }
   })
 
@@ -62,9 +62,11 @@ export function useMultiEngineDetection() {
       }
       if (!yolov8Ref.current) {
         yolov8Ref.current = new YOLOv8FaceDetector()
+        await yolov8Ref.current.initialize()
       }
       if (!dlibRef.current) {
         dlibRef.current = new Dlib68PointDetector()
+        await dlibRef.current.initialize()
       }
       if (!openfaceRef.current) {
         openfaceRef.current = new OpenFaceDetector()
@@ -104,50 +106,64 @@ export function useMultiEngineDetection() {
     const yaw = mpData?.orientation?.yaw || 0
     const pitch = mpData?.orientation?.pitch || 0
 
-    // 2. YOLOv8-Face
-    const yoloRes = yolov8Ref.current ? yolov8Ref.current.detect(video, activeLandmarks) : { isDetected: false, confidence: 0, latencyMs: 0, fps: 0, memoryMb: 0, cpuLoadPct: 0 }
+    // 2. YOLOv8-Face ONNX (lindevs single-class)
+    const yoloRes = yolov8Ref.current
+      ? await yolov8Ref.current.detectMultiFace(video)
+      : { isDetected: false, confidence: 0, latencyMs: 0, fps: 0, memoryMb: 0, cpuLoadPct: 0, faceCount: 0, hasMultipleFaces: false, boxes: [], timestamp: Date.now() }
 
-    // 3. Dlib 68-Point
-    const dlibRes = dlibRef.current ? dlibRef.current.detect(video, activeLandmarks) : { isDetected: false, landmarks68: [], confidence: 0, latencyMs: 0, fps: 0, memoryMb: 0, cpuLoadPct: 0 }
+    // 3. Dlib 68-Point (face-api landmark68Net)
+    const dlibRes = dlibRef.current
+      ? await dlibRef.current.detect(video)
+      : {
+          isDetected: false,
+          landmarks68: [],
+          confidence: 0,
+          detectionScore: 0,
+          landmarkQuality: null,
+          latencyMs: 0,
+          fps: 0,
+          memoryMb: 0,
+          cpuLoadPct: 0,
+          timestamp: Date.now(),
+        }
 
-    // 4. OpenFace
-    const openfaceRes = openfaceRef.current ? openfaceRef.current.detect(video, activeLandmarks, yaw, pitch) : {
-      isDetected: false,
-      actionUnits: { au01_InnerBrowRaiser: 0, au02_OuterBrowRaiser: 0, au04_BrowLowerer: 0, au12_LipCornerPuller: 0, au26_JawDrop: 0, au45_Blink: 0 },
-      gazeVector: { x: 0, y: 0, z: -1, eyeContact: false },
-      poseAngle: { pitch: 0, yaw: 0, roll: 0 },
-      confidence: 0,
-      latencyMs: 0,
-      fps: 0,
-      memoryMb: 0,
-      cpuLoadPct: 0
-    }
+    // 4. OpenFace — not available in browser (UI passthrough only)
+    const openfaceRes = openfaceRef.current
+      ? openfaceRef.current.detectFromMediaPipe(video, yaw, pitch, mpData?.actionUnits, mpData?.gaze, activeLandmarks)
+      : {
+          isDetected: false,
+          actionUnits: null,
+          gazeVector: { x: 0, y: 0, z: -1, eyeContact: false },
+          poseAngle: { pitch: 0, yaw: 0, roll: 0 },
+          confidence: null,
+          latencyMs: 0,
+          fps: 0,
+          memoryMb: 0,
+          cpuLoadPct: 0,
+        }
 
-    const mpDynamicLatency = Number((Math.max(4.5, mpLatency) + Math.sin(Date.now() / 250) * 1.5).toFixed(1))
-    const mpDynamicFps = Math.min(60, Number((1000 / (mpDynamicLatency + 8.8)).toFixed(1)))
-    const mpMemoryMb = Number((38.5 + Math.sin(Date.now() / 350) * 2.2).toFixed(1))
-    const mpCpuLoadPct = Number(((mpDynamicLatency / 16.6) * 100).toFixed(1))
+    const mpDerivedFps = mpLatency > 0 ? Number((1000 / mpLatency).toFixed(1)) : 0
 
     setResults({
       mediapipe: {
         data: mpData,
-        fps: mpDynamicFps,
-        latencyMs: mpDynamicLatency,
+        fps: mpDerivedFps,
+        latencyMs: Number(mpLatency.toFixed(1)),
         landmarksCount: mpData?.landmarks?.length || 468,
-        memoryMb: mpMemoryMb,
-        cpuLoadPct: mpCpuLoadPct
+        memoryMb: 0,
+        cpuLoadPct: 0
       },
       yolov8: {
         ...yoloRes,
-        landmarksCount: 5
+        landmarksCount: 0
       },
       dlib: {
         ...dlibRes,
-        landmarksCount: 68
+        landmarksCount: dlibRes.landmarks68?.length || 0
       },
       openface: {
         ...openfaceRes,
-        landmarksCount: 68
+        landmarksCount: 0
       }
     })
   }, [])

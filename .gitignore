@@ -41,8 +41,12 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+services/openface-server/.railway-linked
+services/openface-server/.fly
+# lab benchmark exports
+lab-monitor*.csv
+logs/lab-monitor*.csv
 
-# documentation files to ignore
-Face_Detection_Tools_Comparison.md
-PROJECT_SUMMARY.md
+# duplicate local ONNX artifact (use public/models/l2cs-net-448.onnx)
+/l2cs_net_1x3x448x448.onnx
 

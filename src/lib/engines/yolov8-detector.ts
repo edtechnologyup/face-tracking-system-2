@@ -1,3 +1,12 @@
+import { loadYoloOnnxSession, runYoloOnnxDetection } from './yolo-onnx-inference';
+import { YOLO_FACE_MODEL_FILE } from './yolo-constants';
+
+/** Real YOLOv8n-Face ONNX via onnxruntime-web (lindevs single-class face model) */
+export const YOLO_WRAPS_MEDIAPIPE = false;
+export const YOLO_USES_FACE_API = false;
+export const YOLO_USES_ONNX = true;
+export const YOLO_MODEL_FILE = YOLO_FACE_MODEL_FILE;
+
 export interface YOLOv8FaceBox {
   x: number;
   y: number;
@@ -33,152 +42,124 @@ export interface YOLOv8MultiFaceResult {
   timestamp: number;
 }
 
+const emptyMulti = (now: number): YOLOv8MultiFaceResult => ({
+  isDetected: false,
+  faceCount: 0,
+  hasMultipleFaces: false,
+  boxes: [],
+  confidence: 0,
+  latencyMs: 0,
+  fps: 0,
+  memoryMb: 0,
+  cpuLoadPct: 0,
+  timestamp: now,
+});
+
+function pickPrimaryBox(
+  boxes: YOLOv8FaceBox[],
+  videoW: number,
+  videoH: number
+): YOLOv8FaceBox | undefined {
+  if (boxes.length === 0) return undefined;
+  const cx = videoW / 2;
+  const cy = videoH / 2;
+  return [...boxes].sort((a, b) => {
+    const aCx = a.x + a.width / 2;
+    const aCy = a.y + a.height / 2;
+    const bCx = b.x + b.width / 2;
+    const bCy = b.y + b.height / 2;
+    const aDist = Math.hypot(aCx - cx, aCy - cy);
+    const bDist = Math.hypot(bCx - cx, bCy - cy);
+    if (Math.abs(aDist - bDist) > 20) return aDist - bDist;
+    return b.confidence - a.confidence;
+  })[0];
+}
+
 export class YOLOv8FaceDetector {
-  /**
-   * Single face detection (Backward Compatibility)
-   */
-  detect(video: HTMLVideoElement, landmarks?: Array<{ x: number; y: number }>): YOLOv8DetectionResult {
-    const multiResult = this.detectMultiFace(video, landmarks ? [landmarks] : undefined);
-    return {
-      isDetected: multiResult.isDetected,
-      box: multiResult.primaryBox ? {
-        x: multiResult.primaryBox.x,
-        y: multiResult.primaryBox.y,
-        width: multiResult.primaryBox.width,
-        height: multiResult.primaryBox.height,
-      } : undefined,
-      confidence: multiResult.confidence,
-      keypoints: multiResult.keypoints,
-      latencyMs: multiResult.latencyMs,
-      fps: multiResult.fps,
-      memoryMb: multiResult.memoryMb,
-      cpuLoadPct: multiResult.cpuLoadPct,
-    };
+  private ready = false;
+  private lastRunMs = 0;
+  private lastFps = 0;
+  private readonly minIntervalMs = 100;
+  private lastCached: YOLOv8MultiFaceResult | null = null;
+
+  async initialize(): Promise<boolean> {
+    try {
+      await loadYoloOnnxSession();
+      this.ready = true;
+    } catch (err) {
+      console.error('YOLOv8 ONNX init error:', err);
+      this.ready = false;
+    }
+    return this.ready;
   }
 
-  /**
-   * Multi-face background scanner for Online Proctoring
-   * Accepts allFacesLandmarks (array of landmark arrays) to detect & calculate boxes for all people in frame
-   */
-  detectMultiFace(
+  async detectMultiFace(
     video: HTMLVideoElement,
-    allFacesLandmarks?: Array<Array<{ x: number; y: number }>> | Array<{ x: number; y: number }>,
-    simulateIntruder = false
-  ): YOLOv8MultiFaceResult {
-    const startTime = performance.now();
+    _allFacesLandmarks?: unknown,
+    simulateIntruder = false,
+    options?: { bypassCache?: boolean }
+  ): Promise<YOLOv8MultiFaceResult> {
     const now = Date.now();
+    if (!video || video.readyState < 2) return emptyMulti(now);
 
-    if (!video || video.readyState < 2) {
-      return {
-        isDetected: false,
-        faceCount: 0,
-        hasMultipleFaces: false,
-        boxes: [],
-        confidence: 0,
-        latencyMs: 0,
-        fps: 0,
-        memoryMb: 0,
-        cpuLoadPct: 0,
-        timestamp: now,
-      };
+    if (!options?.bypassCache && this.lastCached && now - this.lastRunMs < this.minIntervalMs) {
+      return { ...this.lastCached, timestamp: this.lastRunMs };
     }
 
     const vw = video.videoWidth || 640;
     const vh = video.videoHeight || 480;
-    const boxes: YOLOv8FaceBox[] = [];
 
-    // Format input landmarks into 2D array if 1D array was provided
-    let normalizedLandmarkSets: Array<Array<{ x: number; y: number }>> = [];
-    if (allFacesLandmarks && allFacesLandmarks.length > 0) {
-      if ('x' in allFacesLandmarks[0]) {
-        // 1D Array of landmarks
-        normalizedLandmarkSets = [allFacesLandmarks as Array<{ x: number; y: number }>];
-      } else {
-        // 2D Array of face landmark sets
-        normalizedLandmarkSets = allFacesLandmarks as Array<Array<{ x: number; y: number }>>;
-      }
-    }
+    try {
+      const { boxes: rawBoxes, latencyMs } = await runYoloOnnxDetection(video);
 
-    if (normalizedLandmarkSets.length > 0) {
-      // Calculate Bounding Box dynamically for each detected face from landmarks
-      normalizedLandmarkSets.forEach((landmarks, idx) => {
-        if (!landmarks || landmarks.length === 0) return;
-        let minX = vw, maxX = 0, minY = vh, maxY = 0;
-        landmarks.forEach((pt) => {
-          const px = pt.x * vw;
-          const py = pt.y * vh;
-          if (px < minX) minX = px;
-          if (px > maxX) maxX = px;
-          if (py < minY) minY = py;
-          if (py > maxY) maxY = py;
-        });
+      let boxes: YOLOv8FaceBox[] = rawBoxes.map((b, idx) => ({
+        x: b.x,
+        y: b.y,
+        width: b.width,
+        height: b.height,
+        confidence: b.confidence,
+        isPrimary: idx === 0,
+      }));
 
-        const padX = (maxX - minX) * 0.15;
-        const padY = (maxY - minY) * 0.15;
-        const bx = Math.max(0, Math.round(minX - padX));
-        const by = Math.max(0, Math.round(minY - padY));
-        const bw = Math.min(vw - bx, Math.round(maxX - minX + padX * 2));
-        const bh = Math.min(vh - by, Math.round(maxY - minY + padY * 2));
-
+      if (simulateIntruder && process.env.NODE_ENV === 'development' && boxes.length === 1) {
         boxes.push({
-          x: bx,
-          y: by,
-          width: bw,
-          height: bh,
-          confidence: Number((0.95 + Math.sin((now + idx * 100) / 220) * 0.02).toFixed(3)),
-          isPrimary: idx === 0,
+          x: Math.round(vw * 0.68),
+          y: Math.round(vh * 0.18),
+          width: Math.round(vw * 0.24),
+          height: Math.round(vh * 0.32),
+          confidence: 0.91,
+          isPrimary: false,
         });
-      });
-    } else {
-      // เมื่อไม่มี landmarks ส่งเข้ามา (ไม่พบใบหน้า) ไม่ควรสร้าง bounding box ปลอม
-      // เพื่อให้ isDetected คืนค่า false ได้อย่างถูกต้อง
+      }
+
+      const primary = pickPrimaryBox(boxes, vw, vh);
+      boxes = boxes.map(b => ({ ...b, isPrimary: primary ? b === primary : b.isPrimary }));
+
+      this.lastFps = latencyMs > 0 ? Number((1000 / latencyMs).toFixed(1)) : 0;
+
+      const result: YOLOv8MultiFaceResult = {
+        isDetected: boxes.length > 0,
+        faceCount: boxes.length,
+        hasMultipleFaces: boxes.length > 1,
+        primaryBox: primary,
+        boxes,
+        confidence: primary?.confidence ?? 0,
+        keypoints: primary
+          ? [{ x: primary.x + primary.width * 0.5, y: primary.y + primary.height * 0.35 }]
+          : [],
+        latencyMs,
+        fps: this.lastFps,
+        memoryMb: 0,
+        cpuLoadPct: 0,
+        timestamp: now,
+      };
+
+      this.lastCached = result;
+      this.lastRunMs = now;
+      return result;
+    } catch (err) {
+      console.error('YOLOv8 ONNX detectMultiFace error:', err);
+      return emptyMulti(now);
     }
-
-    // Add Simulated Intruder if toggle enabled for UI testing
-    if (simulateIntruder && boxes.length === 1) {
-      boxes.push({
-        x: Math.round(vw * 0.68),
-        y: Math.round(vh * 0.18),
-        width: Math.round(vw * 0.24),
-        height: Math.round(vh * 0.32),
-        confidence: 0.91,
-        isPrimary: false,
-      });
-    }
-
-    const primaryBox = boxes.find((b) => b.isPrimary) || boxes[0];
-
-    const keypoints = primaryBox
-      ? [
-          { x: primaryBox.x + primaryBox.width * 0.3, y: primaryBox.y + primaryBox.height * 0.38 },
-          { x: primaryBox.x + primaryBox.width * 0.7, y: primaryBox.y + primaryBox.height * 0.38 },
-          { x: primaryBox.x + primaryBox.width * 0.5, y: primaryBox.y + primaryBox.height * 0.55 },
-          { x: primaryBox.x + primaryBox.width * 0.35, y: primaryBox.y + primaryBox.height * 0.75 },
-          { x: primaryBox.x + primaryBox.width * 0.65, y: primaryBox.y + primaryBox.height * 0.75 },
-        ]
-      : [];
-
-    const endTime = performance.now();
-    const rawLatency = endTime - startTime;
-    const dynamicJitter = Math.sin(now / 150) * 1.8 + Math.cos(now / 300) * 0.9;
-    const latencyMs = Number(Math.max(2.1, 4.2 + dynamicJitter + rawLatency).toFixed(1));
-    const fps = Math.min(60, Number((1000 / (latencyMs + 12.2)).toFixed(1)));
-    const memoryMb = Number((48 + Math.sin(now / 400) * 3.5).toFixed(1));
-    const cpuLoadPct = Number(((latencyMs / 16.6) * 100).toFixed(1));
-
-    return {
-      isDetected: boxes.length > 0,
-      faceCount: boxes.length,
-      hasMultipleFaces: boxes.length > 1,
-      primaryBox,
-      boxes,
-      confidence: primaryBox ? primaryBox.confidence : 0,
-      keypoints,
-      latencyMs,
-      fps,
-      memoryMb,
-      cpuLoadPct,
-      timestamp: now,
-    };
   }
 }

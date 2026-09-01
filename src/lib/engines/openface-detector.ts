@@ -1,5 +1,16 @@
+import type { IrisGazeEstimate } from '@/lib/gaze-estimation';
+import type { MediapipeBlendshapePayload } from '@/lib/blendshape-action-units';
+
+/** OpenFace runs on remote Docker service — browser uses UI passthrough until server responds. */
+export const OPENFACE_IS_MOCK = false;
+export const OPENFACE_AVAILABLE_IN_BROWSER = false;
+export const OPENFACE_USES_REMOTE_SERVER = true;
+export const OPENFACE_USES_MEDIAPIPE_BLENDSHAPES = false;
+
+export type OpenFaceSource = 'openface-server' | 'ui-passthrough';
+
 export interface OpenFaceActionUnits {
-  au01_InnerBrowRaiser: number; // 0.0 - 5.0
+  au01_InnerBrowRaiser: number;
   au02_OuterBrowRaiser: number;
   au04_BrowLowerer: number;
   au12_LipCornerPuller: number;
@@ -9,44 +20,63 @@ export interface OpenFaceActionUnits {
 
 export interface OpenFaceDetectionResult {
   isDetected: boolean;
-  actionUnits: OpenFaceActionUnits;
+  actionUnits: OpenFaceActionUnits | MediapipeBlendshapePayload | null;
   gazeVector: { x: number; y: number; z: number; eyeContact: boolean };
   poseAngle: { pitch: number; yaw: number; roll: number };
   faceCenter?: { x: number; y: number };
-  confidence: number;
+  /** RetinaFace score from OpenFace 3.0 server when available */
+  confidence: number | null;
   latencyMs: number;
   fps: number;
   memoryMb: number;
   cpuLoadPct: number;
+  source?: OpenFaceSource;
+  timestamp?: number;
+  serverLatencyMs?: number;
+  /** Full fetch round-trip including network (benchmark latencyScope=networkRoundTrip) */
+  clientRoundTripMs?: number;
 }
 
-export class OpenFaceDetector {
-  detect(video: HTMLVideoElement, landmarks?: Array<{ x: number; y: number }>, yaw: number = 0, pitch: number = 0): OpenFaceDetectionResult {
-    const startTime = performance.now();
-    const now = Date.now();
+const emptyResult = (): OpenFaceDetectionResult => ({
+  isDetected: false,
+  actionUnits: null,
+  gazeVector: { x: 0, y: 0, z: -1, eyeContact: false },
+  poseAngle: { pitch: 0, yaw: 0, roll: 0 },
+  confidence: null,
+  latencyMs: 0,
+  fps: 0,
+  memoryMb: 0,
+  cpuLoadPct: 0,
+  source: 'ui-passthrough',
+});
 
-    if (!video || video.readyState < 2) {
-      return {
-        isDetected: false,
-        actionUnits: { au01_InnerBrowRaiser: 0, au02_OuterBrowRaiser: 0, au04_BrowLowerer: 0, au12_LipCornerPuller: 0, au26_JawDrop: 0, au45_Blink: 0 },
-        gazeVector: { x: 0, y: 0, z: -1, eyeContact: false },
-        poseAngle: { pitch: 0, yaw: 0, roll: 0 },
-        confidence: 0,
-        latencyMs: 0,
-        fps: 0,
-        memoryMb: 0,
-        cpuLoadPct: 0
-      };
+export class OpenFaceDetector {
+  /**
+   * UI-only passthrough for benchmark panel — does not produce OpenFace model scores.
+   * Facial expression data lives in actionUnitsJson from MediaPipe blendshapes.
+   */
+  detectFromMediaPipe(
+    video: HTMLVideoElement | null,
+    yaw: number,
+    pitch: number,
+    _actionUnits?: MediapipeBlendshapePayload | null,
+    gaze?: IrisGazeEstimate | null,
+    landmarks?: Array<{ x: number; y: number }>
+  ): OpenFaceDetectionResult {
+    const startTime = performance.now();
+
+    if (!video || video.readyState < 2 || !gaze) {
+      return emptyResult();
     }
 
     const vw = video.videoWidth || 640;
     const vh = video.videoHeight || 480;
-
     let cx = vw / 2;
     let cy = vh / 2;
 
     if (landmarks && landmarks.length > 0) {
-      let sumX = 0, sumY = 0;
+      let sumX = 0;
+      let sumY = 0;
       landmarks.forEach(pt => {
         sumX += pt.x * vw;
         sumY += pt.y * vh;
@@ -55,48 +85,37 @@ export class OpenFaceDetector {
       cy = sumY / landmarks.length;
     }
 
-    const gazeX = Number((yaw * 0.02).toFixed(2));
-    const gazeY = Number((pitch * 0.02).toFixed(2));
-    const isEyeContact = Math.abs(yaw) < 15 && Math.abs(pitch) < 10;
+    const avgGazeX = (gaze.left.x + gaze.right.x) / 2;
+    const avgGazeY = (gaze.left.y + gaze.right.y) / 2;
+    const gazeZ = (gaze.left.z + gaze.right.z) / 2;
 
-    const endTime = performance.now();
-    const rawLatency = endTime - startTime;
-    const dynamicJitter = Math.sin(now / 200) * 8.5 + Math.cos(now / 400) * 4.2;
-    const latencyMs = Number(Math.max(38.0, 52.0 + dynamicJitter + rawLatency).toFixed(1));
+    const gazeYaw = gaze.yaw ?? yaw;
+    const gazePitch = gaze.pitch ?? pitch;
+    const isEyeContact = Math.abs(gazeYaw) < 15 && Math.abs(gazePitch) < 12;
 
-    const fps = Number((1000 / (latencyMs + 18.5)).toFixed(1));
-    const confidence = Number((0.982 + Math.sin(now / 240) * 0.012 + Math.cos(now / 480) * 0.006).toFixed(3));
-
-    const memoryMb = Number((340 + Math.sin(now / 600) * 18.5).toFixed(1));
-    const cpuLoadPct = Number(((latencyMs / 16.6) * 100).toFixed(1));
+    const latencyMs = Number((performance.now() - startTime).toFixed(1));
 
     return {
       isDetected: true,
-      actionUnits: {
-        au01_InnerBrowRaiser: Math.abs(pitch) > 10 ? 1.5 : 0.8,
-        au02_OuterBrowRaiser: 0.5,
-        au04_BrowLowerer: 0.2,
-        au12_LipCornerPuller: 1.4,
-        au26_JawDrop: 0.1,
-        au45_Blink: 0.0
-      },
+      actionUnits: null,
       gazeVector: {
-        x: gazeX,
-        y: gazeY,
-        z: -0.99,
-        eyeContact: isEyeContact
+        x: Number(avgGazeX.toFixed(3)),
+        y: Number(avgGazeY.toFixed(3)),
+        z: Number(gazeZ.toFixed(3)),
+        eyeContact: isEyeContact,
       },
       poseAngle: {
         pitch: Number(pitch.toFixed(1)),
         yaw: Number(yaw.toFixed(1)),
-        roll: 0.4
+        roll: 0,
       },
       faceCenter: { x: cx, y: cy },
-      confidence,
+      confidence: null,
       latencyMs,
-      fps,
-      memoryMb,
-      cpuLoadPct
+      fps: latencyMs > 0 ? Number((1000 / latencyMs).toFixed(1)) : 0,
+      memoryMb: 0,
+      cpuLoadPct: Number(((latencyMs / 16.6) * 100).toFixed(1)),
+      source: 'ui-passthrough',
     };
   }
 }

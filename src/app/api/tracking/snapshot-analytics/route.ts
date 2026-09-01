@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { L2CSGazeDetector } from '@/lib/engines/l2cs-gaze-detector'
+import { L2CSGazeDetector, predictGazeHeuristic } from '@/lib/engines/l2cs-gaze-detector'
 import { MiniFASNetLivenessDetector } from '@/lib/engines/minifas-liveness'
 import { rateLimit } from '@/lib/utils/rate-limiter'
+import {
+  labelBehaviorFromFeatures,
+  scenarioToViolationType,
+  type AttentionState,
+} from '@/lib/behavior-rule-labeler'
+import { estimateOcclusion } from '@/lib/distance-occlusion'
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +19,11 @@ export async function POST(request: NextRequest) {
       violationType, // 'MULTI_FACE_DETECTED' | 'LOOKING_AWAY_EXCEEDED' | 'FACE_LOSS'
       landmarks,     // Facial landmarks array from MediaPipe
       yaw = 0,
-      pitch = 0
+      pitch = 0,
+      faceCount = 1,
+      brightnessMean = 0.5,
+      faceDistanceCm = null,
+      hasFace = true,
     } = body
 
     // Rate limiting: จำกัด 15 requests per session, refill 2 tokens/s (ปกติเรียกทุก 20 วินาที)
@@ -33,9 +43,9 @@ export async function POST(request: NextRequest) {
 
     // 1. Run L2CS-Net 3D Eye Gaze Estimation
     const gazeDetector = new L2CSGazeDetector()
-    // Simulated mock video object wrapper for backend node execution
-    const mockElement = {} as HTMLVideoElement
-    const gazeResult = gazeDetector.predictGaze(mockElement, landmarks)
+    const gazeResult =
+      predictGazeHeuristic(landmarks) ??
+      gazeDetector.predictGaze({} as HTMLVideoElement, landmarks)
 
     // Override pitch/yaw if passed directly from client
     if (typeof yaw === 'number' && Math.abs(yaw) > Math.abs(gazeResult.gazeYaw)) {
@@ -47,12 +57,45 @@ export async function POST(request: NextRequest) {
 
     // 2. Run MiniFASNet Anti-Spoofing & Liveness Verification
     const livenessDetector = new MiniFASNetLivenessDetector()
-    const livenessResult = livenessDetector.evaluateLiveness(mockElement, landmarks)
+    const livenessResult = livenessDetector.evaluateLiveness({} as HTMLVideoElement, landmarks)
+
+    const occlusionEstimate = estimateOcclusion({ landmarks })
+    const now = Date.now()
+    const attentionState: AttentionState = { direction: 'CENTER', startTime: now }
+    const ruleLabel = labelBehaviorFromFeatures({
+      now,
+      hasFace: Boolean(hasFace),
+      faceCount: typeof faceCount === 'number' ? faceCount : 1,
+      yaw,
+      pitch,
+      occlusionScore: occlusionEstimate.score,
+      brightnessMean: typeof brightnessMean === 'number' ? brightnessMean : 0.5,
+      faceDistanceCm: typeof faceDistanceCm === 'number' ? faceDistanceCm : null,
+      qualityReady: true,
+      hasGaze: true,
+      landmarkCount: Array.isArray(landmarks) ? landmarks.length : 0,
+      attentionState,
+      naturalReadingState: { startTime: null, yawSamples: [] },
+    })
+
+    const derivedViolation =
+      violationType ||
+      scenarioToViolationType(ruleLabel.scenario) ||
+      (gazeResult.isLookingOffScreen ? 'LOOKING_AWAY_EXCEEDED' : 'ROUTINE_ANALYTICS')
 
     // 3. Construct Deep Security Report Payload
     const analyticsReport = {
       timestamp: new Date().toISOString(),
-      violationType: violationType || (gazeResult.isLookingOffScreen ? 'LOOKING_AWAY_EXCEEDED' : 'ROUTINE_ANALYTICS'),
+      violationType: derivedViolation,
+      behaviorLabel: {
+        scenario: ruleLabel.scenario,
+        validPhases: ruleLabel.validPhases,
+        phase: 'NATURAL_TASK',
+        isValid: ruleLabel.isValid,
+        invalidReason: ruleLabel.invalidReason,
+        direction: ruleLabel.direction,
+        durationLookingMs: ruleLabel.durationLookingMs,
+      },
       gazeAnalytics: {
         pitch: gazeResult.gazePitch,
         yaw: gazeResult.gazeYaw,
@@ -67,6 +110,11 @@ export async function POST(request: NextRequest) {
         attackTypeDetected: livenessResult.attackTypeDetected,
         recommendation: livenessResult.recommendation
       },
+      occlusionAnalytics: {
+        score: occlusionEstimate.score,
+        confidence: occlusionEstimate.confidence,
+        method: occlusionEstimate.method,
+      },
       snapshotCaptured: !!snapshotImage,
       snapshotSizeKb: snapshotImage ? Number((snapshotImage.length / 1024).toFixed(1)) : 0
     }
@@ -75,7 +123,12 @@ export async function POST(request: NextRequest) {
     let savedLogId: string | null = null
     if (sessionId) {
       try {
-        const detectionType = violationType === 'FACE_LOSS' ? 'FACE_DETECTION_LOSS' : 'FACE_ORIENTATION'
+        const detectionType =
+          derivedViolation === 'FACE_LOSS'
+            ? 'FACE_DETECTION_LOSS'
+            : derivedViolation === 'MULTI_FACE_DETECTED'
+              ? 'SECURITY_VIOLATION'
+              : 'FACE_ORIENTATION'
         const logEntry = await prisma.trackingLog.create({
           data: {
             sessionId,

@@ -20,3 +20,7 @@ for file in "${FILES[@]}"; do
 done
 
 echo "Done"
+
+echo "Downloading L2CS-Net ONNX (Quadric int8, ~24MB)..."
+curl -sL -o "l2cs-net-448.onnx" "https://sdk-cli-models.s3.us-east-2.amazonaws.com/l2csnet-sim_opt_asym_int8_q.onnx"
+echo "L2CS model saved to public/models/l2cs-net-448.onnx"

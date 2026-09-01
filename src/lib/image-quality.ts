@@ -1,7 +1,8 @@
 export interface ImageQualityScores {
   brightnessMean: number;
   contrastScore: number;
-  blurScore: number;
+  /** Laplacian variance normalized 0–1; สูง = ภาพคมชัด */
+  sharpnessScore: number;
 }
 
 // Reusable canvas so we don't create DOM elements every 2 seconds
@@ -9,7 +10,7 @@ let _qualityCanvas: HTMLCanvasElement | null = null;
 let _qualityCtx: CanvasRenderingContext2D | null = null;
 
 /**
- * Calculates brightness, contrast, and blur score of a cropped region of a video.
+ * Calculates brightness, contrast, and sharpness of a cropped region of a video.
  * @param video The source video element
  * @param bbox Bounding box to crop {x, y, width, height}
  */
@@ -19,7 +20,7 @@ export function analyzeImageQuality(
 ): ImageQualityScores {
   // Fallbacks if no video or invalid size
   if (!video || video.videoWidth === 0) {
-    return { brightnessMean: 0.5, contrastScore: 0.5, blurScore: 0 };
+    return { brightnessMean: 0.5, contrastScore: 0.5, sharpnessScore: 0 };
   }
 
   // Target small resolution for fast performance
@@ -33,7 +34,7 @@ export function analyzeImageQuality(
   }
   
   if (!_qualityCtx || !_qualityCanvas) {
-    return { brightnessMean: 0.5, contrastScore: 0.5, blurScore: 0 };
+    return { brightnessMean: 0.5, contrastScore: 0.5, sharpnessScore: 0 };
   }
 
   let sourceX = 0, sourceY = 0, sourceW = video.videoWidth, sourceH = video.videoHeight;
@@ -88,11 +89,7 @@ export function analyzeImageQuality(
     // Normalize contrast (max theoretical RMS contrast is around 127)
     const contrastScore = Math.min(1.0, rmsContrast / 127.0);
 
-    // 3. Calculate Blur (Variance of Laplacian)
-    // We use a simple 3x3 Laplacian kernel:
-    // [ 0,  1,  0]
-    // [ 1, -4,  1]
-    // [ 0,  1,  0]
+    // 3. Variance of Laplacian — higher = sharper image
     let laplacianSum = 0;
     let laplacianSqSum = 0;
     let laplacianCount = 0;
@@ -116,18 +113,15 @@ export function analyzeImageQuality(
     const lapMean = laplacianSum / laplacianCount;
     const lapVariance = (laplacianSqSum / laplacianCount) - (lapMean * lapMean);
     
-    // lapVariance is our blur score. 
-    // Typical sharp images have variance > 500. Blurry images < 100.
-    // Let's cap it at 1000 for normalization.
-    const blurScore = Math.min(1.0, lapVariance / 1000.0);
+    const sharpnessScore = Math.min(1.0, lapVariance / 1000.0);
 
     return {
       brightnessMean,
       contrastScore,
-      blurScore
+      sharpnessScore,
     };
   } catch (err) {
     console.error("Error analyzing image quality:", err);
-    return { brightnessMean: 0.5, contrastScore: 0.5, blurScore: 0 };
+    return { brightnessMean: 0.5, contrastScore: 0.5, sharpnessScore: 0 };
   }
 }

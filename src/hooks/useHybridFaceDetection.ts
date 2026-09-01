@@ -4,7 +4,17 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { MediaPipeDetector, FaceTrackingData, OrientationStats } from '@/lib/mediapipe-detector'
 import { YOLOv8FaceDetector, YOLOv8MultiFaceResult } from '@/lib/engines/yolov8-detector'
 import { Dlib68PointDetector, DlibDetectionResult } from '@/lib/engines/dlib-detector'
-import { OpenFaceDetector, OpenFaceDetectionResult } from '@/lib/engines/openface-detector'
+import { OpenFaceDetectionResult } from '@/lib/engines/openface-detector'
+import {
+  analyzeOpenFaceRemote,
+  mapRemoteToOpenFaceResult,
+} from '@/lib/engines/openface-client'
+import {
+  captureVideoFrameBase64,
+  OPENFACE_REMOTE_MIN_INTERVAL_MS,
+} from '@/lib/engines/openface-constants'
+import { L2CSGazeDetector, L2CSGazeResult } from '@/lib/engines/l2cs-gaze-detector'
+import { loadFaceApiModels } from '@/lib/face-api/detection'
 
 export interface HybridDetectionConfig {
   primaryIntervalMs?: number  // MediaPipe detection rate (Default: 100ms)
@@ -21,24 +31,15 @@ export interface SecurityViolationEvent {
   snapshotBlob?: string
 }
 
-export interface EngineMetric {
-  name: string
-  isDetected: boolean
-  fps: number
-  latencyMs: number
-  landmarksCount: number
-  memoryMb: number
-  cpuLoadPct: number
-  confidence: number
-}
+import {
+  buildMultiEngineBenchmark,
+  createBenchmarkSnapshotId,
+  type EngineBenchmarkMetric,
+  type MultiEngineBenchmarkPayload,
+} from '@/lib/engine-benchmark'
 
-export interface MultiEngineBenchmarkData {
-  timestamp: string
-  mediapipe: EngineMetric
-  yolov8: EngineMetric
-  dlib: EngineMetric
-  openface: EngineMetric
-}
+export type EngineMetric = EngineBenchmarkMetric
+export type MultiEngineBenchmarkData = MultiEngineBenchmarkPayload
 
 export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
   const {
@@ -58,6 +59,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
   const [yoloMultiFaceData, setYoloMultiFaceData] = useState<YOLOv8MultiFaceResult | null>(null)
   const [dlibData, setDlibData] = useState<DlibDetectionResult | null>(null)
   const [openFaceData, setOpenFaceData] = useState<OpenFaceDetectionResult | null>(null)
+  const [l2csGazeData, setL2csGazeData] = useState<L2CSGazeResult | null>(null)
   const [benchmarkMetrics, setBenchmarkMetrics] = useState<MultiEngineBenchmarkData | null>(null)
 
   const [violations, setViolations] = useState<SecurityViolationEvent[]>([])
@@ -70,24 +72,32 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
   const mpDetectorRef = useRef<MediaPipeDetector | null>(null)
   const yoloDetectorRef = useRef<YOLOv8FaceDetector | null>(null)
   const dlibDetectorRef = useRef<Dlib68PointDetector | null>(null)
-  const openfaceDetectorRef = useRef<OpenFaceDetector | null>(null)
+  const l2csDetectorRef = useRef<L2CSGazeDetector | null>(null)
 
   // Interval Refs
   const primaryIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const yoloIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const openfaceIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Tracking state refs
   const lookingAwayStartTimeRef = useRef<number | null>(null)
   const multiFaceConsecutiveFramesRef = useRef(0)
   const mediaPipeDataRef = useRef<FaceTrackingData | null>(null)
+  const openFaceDataRef = useRef<OpenFaceDetectionResult | null>(null)
   const benchmarkMetricsRef = useRef<MultiEngineBenchmarkData | null>(null)
+  const syncedBenchmarkMetricsRef = useRef<MultiEngineBenchmarkData | null>(null)
+  const syncedCaptureInFlightRef = useRef(false)
   const simulateIntruderRef = useRef(false)
   const lastViolationTimeMapRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     mediaPipeDataRef.current = mediaPipeData
   }, [mediaPipeData])
+
+  useEffect(() => {
+    openFaceDataRef.current = openFaceData
+  }, [openFaceData])
 
   useEffect(() => {
     benchmarkMetricsRef.current = benchmarkMetrics
@@ -109,15 +119,20 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
 
       if (!yoloDetectorRef.current) {
         yoloDetectorRef.current = new YOLOv8FaceDetector()
+        await yoloDetectorRef.current.initialize()
       }
 
       if (!dlibDetectorRef.current) {
         dlibDetectorRef.current = new Dlib68PointDetector()
+        await dlibDetectorRef.current.initialize()
       }
 
-      if (!openfaceDetectorRef.current) {
-        openfaceDetectorRef.current = new OpenFaceDetector()
+      if (!l2csDetectorRef.current) {
+        l2csDetectorRef.current = new L2CSGazeDetector()
+        await l2csDetectorRef.current.initialize()
       }
+
+      await loadFaceApiModels()
 
       setIsInitializing(false)
       return true
@@ -170,78 +185,73 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
         }
 
         const landmarks = data.landmarks
-        const yaw = data.orientation?.yaw || 0
-        const pitch = data.orientation?.pitch || 0
 
         // Run YOLOv8-Face (Model 2) concurrently
         let yRes: YOLOv8MultiFaceResult | null = null
         if (yoloDetectorRef.current) {
-          yRes = yoloDetectorRef.current.detectMultiFace(video, data.allFaceLandmarks || landmarks, simulateIntruderRef.current)
+          yRes = await yoloDetectorRef.current.detectMultiFace(video, undefined, simulateIntruderRef.current)
           setYoloMultiFaceData(yRes)
         }
 
-        // Run Dlib (Model 3) concurrently
         let dRes: DlibDetectionResult | null = null
         if (dlibDetectorRef.current) {
-          dRes = dlibDetectorRef.current.detect(video, landmarks)
+          dRes = await dlibDetectorRef.current.detect(video)
           setDlibData(dRes)
         }
 
-        // Run OpenFace (Model 4) concurrently
-        let ofRes: OpenFaceDetectionResult | null = null
-        if (openfaceDetectorRef.current) {
-          ofRes = openfaceDetectorRef.current.detect(video, landmarks, yaw, pitch)
-          setOpenFaceData(ofRes)
+        let l2csRes: L2CSGazeResult | null = null
+        if (l2csDetectorRef.current) {
+          const faceBox =
+            dRes?.detectionBox ??
+            (yRes?.primaryBox
+              ? {
+                  x: yRes.primaryBox.x,
+                  y: yRes.primaryBox.y,
+                  width: yRes.primaryBox.width,
+                  height: yRes.primaryBox.height,
+                }
+              : undefined);
+          l2csRes = await l2csDetectorRef.current.predictGazeAsync(video, {
+            landmarks,
+            faceBox,
+          })
+          setL2csGazeData(l2csRes)
         }
 
-        // Update 4-Engine Live Benchmark Metrics
-        const now = Date.now()
-        const mpDynamicLatency = Number((Math.max(4.5, mpLatency) + Math.sin(now / 250) * 1.5).toFixed(1))
-        const mpDynamicFps = Math.min(60, Number((1000 / (mpDynamicLatency + 8.8)).toFixed(1)))
+        const ofRes = openFaceDataRef.current
 
-        const liveBenchmark: MultiEngineBenchmarkData = {
-          timestamp: new Date().toISOString(),
-          mediapipe: {
-            name: 'MediaPipe (468 3D Mesh)',
-            isDetected: data.isDetected,
-            fps: mpDynamicFps,
-            latencyMs: mpDynamicLatency,
-            landmarksCount: data.landmarks?.length || 468,
-            memoryMb: Number((38.5 + Math.sin(now / 350) * 2.2).toFixed(1)),
-            cpuLoadPct: Number(((mpDynamicLatency / 16.6) * 100).toFixed(1)),
-            confidence: Number((data.confidence || 0.985).toFixed(3))
-          },
-          yolov8: {
-            name: 'YOLOv8-Face (Bounding Box)',
-            isDetected: yRes?.isDetected ?? true,
-            fps: yRes?.fps || 58.5,
-            latencyMs: yRes?.latencyMs || 5.2,
-            landmarksCount: 5,
-            memoryMb: yRes?.memoryMb || 48,
-            cpuLoadPct: yRes?.cpuLoadPct || 25,
-            confidence: Number((yRes?.confidence || 0.965).toFixed(3))
-          },
-          dlib: {
-            name: 'Dlib (68-Point Landmark)',
-            isDetected: dRes?.isDetected ?? true,
-            fps: dRes?.fps || 18.2,
-            latencyMs: dRes?.latencyMs || 28.5,
-            landmarksCount: 68,
-            memoryMb: dRes?.memoryMb || 92,
-            cpuLoadPct: dRes?.cpuLoadPct || 140,
-            confidence: Number((dRes?.confidence || 0.925).toFixed(3))
-          },
-          openface: {
-            name: 'OpenFace (Action Units & Gaze)',
-            isDetected: ofRes?.isDetected ?? true,
-            fps: ofRes?.fps || 12.4,
-            latencyMs: ofRes?.latencyMs || 54.0,
-            landmarksCount: 68,
-            memoryMb: ofRes?.memoryMb || 340,
-            cpuLoadPct: ofRes?.cpuLoadPct || 310,
-            confidence: Number((ofRes?.confidence || 0.982).toFixed(3))
-          }
-        }
+        const liveBenchmark = buildMultiEngineBenchmark({
+          mpLatencyMs: mpLatency,
+          mpIsDetected: data.isDetected,
+          mpConfidence: data.confidence || 0,
+          mpLandmarksCount: data.landmarks?.length || 0,
+          yolo: yRes
+            ? {
+                isDetected: yRes.isDetected,
+                latencyMs: yRes.latencyMs,
+                confidence: yRes.confidence,
+                faceCount: yRes.faceCount,
+              }
+            : null,
+          dlib: dRes
+            ? {
+                isDetected: dRes.isDetected,
+                latencyMs: dRes.latencyMs,
+                confidence: dRes.confidence,
+                landmarksCount: dRes.landmarks68?.length || 0,
+              }
+            : null,
+          openface: ofRes
+            ? {
+                isDetected: ofRes.isDetected,
+                confidence: ofRes.confidence,
+                clientRoundTripMs: ofRes.clientRoundTripMs ?? ofRes.latencyMs ?? null,
+                serverLatencyMs: ofRes.serverLatencyMs ?? null,
+                resultTimestamp: ofRes.timestamp ?? null,
+              }
+            : null,
+          snapshotSynced: false,
+        })
 
         setBenchmarkMetrics(liveBenchmark)
 
@@ -286,6 +296,91 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     }
   }, [lookingAwayThresholdMs, addViolation])
 
+  /** Same-frame benchmark: MP + YOLO + Dlib on live video, OpenFace on captured JPEG — for DB comparison. */
+  const captureSyncedBenchmark = useCallback(async (video: HTMLVideoElement) => {
+    if (!mpDetectorRef.current || !video || video.readyState < 2) return null
+    if (syncedCaptureInFlightRef.current) {
+      return syncedBenchmarkMetricsRef.current
+    }
+
+    syncedCaptureInFlightRef.current = true
+    const captureNow = Date.now()
+    const snapshotId = createBenchmarkSnapshotId()
+    const frameBase64 = captureVideoFrameBase64(video)
+
+    try {
+      const mpStart = performance.now()
+      const mpData = await mpDetectorRef.current.detectFromVideo(video)
+      const mpLatency = Number((performance.now() - mpStart).toFixed(1))
+
+      if (!mpData) return null
+
+      const yRes = yoloDetectorRef.current
+        ? await yoloDetectorRef.current.detectMultiFace(video, undefined, false, { bypassCache: true })
+        : null
+
+      const dRes = dlibDetectorRef.current
+        ? await dlibDetectorRef.current.detect(video, { bypassCache: true })
+        : null
+
+      let openfaceMapped: OpenFaceDetectionResult | null = null
+      if (frameBase64) {
+        const remote = await analyzeOpenFaceRemote(frameBase64)
+        if (remote) {
+          openfaceMapped = mapRemoteToOpenFaceResult(remote, captureNow)
+          setOpenFaceData(openfaceMapped)
+        }
+      }
+
+      const synced = buildMultiEngineBenchmark({
+        snapshotId,
+        now: captureNow,
+        snapshotSynced: true,
+        mpLatencyMs: mpLatency,
+        mpIsDetected: mpData.isDetected,
+        mpConfidence: mpData.confidence || 0,
+        mpLandmarksCount: mpData.landmarks?.length || 0,
+        yolo: yRes
+          ? {
+              isDetected: yRes.isDetected,
+              latencyMs: yRes.latencyMs,
+              confidence: yRes.confidence,
+              faceCount: yRes.faceCount,
+            }
+          : null,
+        dlib: dRes
+          ? {
+              isDetected: dRes.isDetected,
+              latencyMs: dRes.latencyMs,
+              confidence: dRes.confidence,
+              landmarksCount: dRes.landmarks68?.length || 0,
+            }
+          : null,
+        openface: openfaceMapped
+          ? {
+              isDetected: openfaceMapped.isDetected,
+              confidence: openfaceMapped.confidence,
+              clientRoundTripMs: openfaceMapped.clientRoundTripMs ?? openfaceMapped.latencyMs ?? null,
+              serverLatencyMs: openfaceMapped.serverLatencyMs ?? null,
+              resultTimestamp: captureNow,
+            }
+          : null,
+      })
+
+      syncedBenchmarkMetricsRef.current = synced
+      if (synced.snapshotSynced) {
+        setBenchmarkMetrics(synced)
+      }
+
+      return synced
+    } catch (err) {
+      console.error('Synced benchmark capture failed:', err)
+      return null
+    } finally {
+      syncedCaptureInFlightRef.current = false
+    }
+  }, [])
+
   // 2. Background Loop: YOLOv8-Face (Lower FPS / 1500ms)
   const performBackgroundYoloScan = useCallback(async (video: HTMLVideoElement) => {
     if (!yoloDetectorRef.current || !video || video.readyState < 2) return null
@@ -313,6 +408,26 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     }
   }, [addViolation])
 
+  // 3. Background Loop: OpenFace 3.0 remote server (~800ms)
+  const performOpenFaceRemoteScan = useCallback(async (video: HTMLVideoElement) => {
+    if (!video || video.readyState < 2) return null
+
+    const frame = captureVideoFrameBase64(video)
+    if (!frame) return null
+
+    try {
+      const remote = await analyzeOpenFaceRemote(frame)
+      if (!remote) return null
+
+      const mapped = mapRemoteToOpenFaceResult(remote, Date.now())
+      setOpenFaceData(mapped)
+      return mapped
+    } catch (err) {
+      console.error('Error in OpenFace remote scan:', err)
+      return null
+    }
+  }, [])
+
   // Start Dual Hybrid Tracking Loops for 4 Concurrent Models
   const startHybridTracking = useCallback((videoRef: React.RefObject<HTMLVideoElement | null>) => {
     if (!videoRef.current) return
@@ -323,6 +438,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
 
     if (primaryIntervalRef.current) clearTimeout(primaryIntervalRef.current)
     if (yoloIntervalRef.current) clearTimeout(yoloIntervalRef.current)
+    if (openfaceIntervalRef.current) clearTimeout(openfaceIntervalRef.current)
     if (statsIntervalRef.current) clearInterval(statsIntervalRef.current)
 
     // A) High-frequency Primary Loop (MediaPipe + Dlib + OpenFace)
@@ -345,7 +461,17 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     }
     runYoloLoop()
 
-    // C) Live Real-Time Stats Update Loop (Every 250ms)
+    // C) OpenFace 3.0 remote server loop
+    const runOpenFaceLoop = async () => {
+      if (!isActiveRef.current) return
+      if (videoRef.current) {
+        await performOpenFaceRemoteScan(videoRef.current)
+      }
+      openfaceIntervalRef.current = setTimeout(runOpenFaceLoop, OPENFACE_REMOTE_MIN_INTERVAL_MS)
+    }
+    runOpenFaceLoop()
+
+    // D) Live Real-Time Stats Update Loop (Every 250ms)
     statsIntervalRef.current = setInterval(() => {
       if (mpDetectorRef.current) {
         setOrientationStats(mpDetectorRef.current.getOrientationStats())
@@ -354,7 +480,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     }, 250)
 
     console.log(`🚀 Started 4-Model Multi-Engine Hybrid Tracking (MediaPipe + YOLOv8 + Dlib + OpenFace)`)
-  }, [primaryIntervalMs, yoloIntervalMs, performPrimaryDetection, performBackgroundYoloScan])
+  }, [primaryIntervalMs, yoloIntervalMs, performPrimaryDetection, performBackgroundYoloScan, performOpenFaceRemoteScan])
 
   // Stop Tracking & Cleanup Resources
   const stopHybridTracking = useCallback(() => {
@@ -369,6 +495,10 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
       clearTimeout(yoloIntervalRef.current)
       yoloIntervalRef.current = null
     }
+    if (openfaceIntervalRef.current) {
+      clearTimeout(openfaceIntervalRef.current)
+      openfaceIntervalRef.current = null
+    }
     if (statsIntervalRef.current) {
       clearInterval(statsIntervalRef.current)
       statsIntervalRef.current = null
@@ -380,7 +510,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     }
     yoloDetectorRef.current = null
     dlibDetectorRef.current = null
-    openfaceDetectorRef.current = null
+    l2csDetectorRef.current = null
   }, [])
 
   useEffect(() => {
@@ -429,6 +559,10 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     return benchmarkMetricsRef.current
   }, [])
 
+  const getComparableBenchmarkMetrics = useCallback(() => {
+    return syncedBenchmarkMetricsRef.current
+  }, [])
+
   return {
     isInitializing,
     isActive,
@@ -436,6 +570,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     yoloMultiFaceData,
     dlibData,
     openFaceData,
+    l2csGazeData,
     benchmarkMetrics,
     violations,
     isRecording,
@@ -455,6 +590,8 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     getFaceDetectionLossEvents,
     getOrientationHistory,
     getBenchmarkMetrics,
+    getComparableBenchmarkMetrics,
+    captureSyncedBenchmark,
   }
 }
 

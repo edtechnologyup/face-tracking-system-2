@@ -1,0 +1,16 @@
+services:
+  openface:
+    build:
+      context: ./services/openface-server
+    ports:
+      - "8090:8080"
+    environment:
+      OPENFACE_DEVICE: cpu
+      OPENFACE_WEIGHTS_DIR: /app/weights
+      OPENFACE_API_KEY: ${OPENFACE_API_KEY:-}
+    volumes:
+      - openface-weights:/app/weights
+    restart: unless-stopped
+
+volumes:
+  openface-weights:

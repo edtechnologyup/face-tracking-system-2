@@ -1,0 +1,40 @@
+# Fly.io app name — เปลี่ยนได้ตอน `fly launch` หรือแก้ตรงนี้
+app = "face-tracking-openface"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  OPENFACE_DEVICE = "cpu"
+  OPENFACE_WEIGHTS_DIR = "/app/weights"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "180s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "10s"
+
+[[vm]]
+  memory = "4gb"
+  cpu_kind = "shared"
+  cpus = 2
+
+# เปิดใช้หลังสร้าง volume: fly volumes create openface_weights --region sin --size 1
+# [mounts]
+#   source = "openface_weights"
+#   destination = "/app/weights"
+#   initial_size = "1gb"
+
+[mounts]
+  source = "openface_weights"
+  destination = "/app/weights"

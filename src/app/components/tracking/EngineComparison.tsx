@@ -135,13 +135,16 @@ export function EngineComparison() {
             ctx.arc(fc.x + gaze.x * 220, fc.y - 20 + gaze.y * 220, 7, 0, 2 * Math.PI)
             ctx.fill()
 
-            // Draw Action Units Panel Overlay
+            // Draw blendshape panel from MediaPipe (OpenFace not available in browser)
             ctx.fillStyle = 'rgba(15, 23, 42, 0.75)'
-            ctx.fillRect(10, 10, 220, 80)
+            ctx.fillRect(10, 10, 240, 80)
             ctx.fillStyle = '#e9d5ff'
             ctx.font = 'bold 12px Inter, sans-serif'
-            ctx.fillText(`AU12 (Smile): ${results.openface.actionUnits.au12_LipCornerPuller}`, 20, 32)
-            ctx.fillText(`AU45 (Blink): ${results.openface.actionUnits.au45_Blink}`, 20, 52)
+            const bs = results.mediapipe.data?.actionUnits?.blendshapes
+            const smile = bs?.mouthSmileLeft ?? bs?.mouthSmileRight
+            const blink = bs?.eyeBlinkLeft ?? bs?.eyeBlinkRight
+            ctx.fillText(`Blendshape Smile: ${smile != null ? smile.toFixed(2) : '-'}`, 20, 32)
+            ctx.fillText(`Blendshape Blink: ${blink != null ? blink.toFixed(2) : '-'}`, 20, 52)
             ctx.fillText(`Eye Contact: ${gaze.eyeContact ? 'YES (มองตรง)' : 'NO (หันมองอื่น)'}`, 20, 72)
           }
         }
@@ -417,7 +420,7 @@ export function EngineComparison() {
               <tr>
                 <td className="px-4 py-3 font-semibold text-gray-900">ความแม่นยำ (Real-Time Confidence)</td>
                 <td className="px-4 py-3 text-green-700 bg-green-50/30">
-                  <div className="font-bold text-green-600">{((results.mediapipe.data?.confidence || 0.985) * 100).toFixed(1)}%</div>
+                  <div className="font-bold text-green-600">{((results.mediapipe.data?.confidence || 0) * 100).toFixed(1)}%</div>
                 </td>
                 <td className="px-4 py-3 text-blue-700 bg-blue-50/30">
                   <div className="font-bold text-blue-600">{(results.yolov8.confidence * 100).toFixed(1)}%</div>
@@ -426,7 +429,7 @@ export function EngineComparison() {
                   <div className="font-bold text-amber-600">{(results.dlib.confidence * 100).toFixed(1)}%</div>
                 </td>
                 <td className="px-4 py-3 text-purple-700 bg-purple-50/30">
-                  <div className="font-bold text-purple-600">{(results.openface.confidence * 100).toFixed(1)}%</div>
+                  <div className="font-bold text-purple-600">N/A</div>
                 </td>
               </tr>
               <tr>
@@ -434,7 +437,7 @@ export function EngineComparison() {
                 <td className="px-4 py-3 text-green-700 bg-green-50/30">ปานกลาง (Head Pose)</td>
                 <td className="px-4 py-3 text-blue-700 bg-blue-50/30">ไม่มี (เน้นตรวจจับกรอบ)</td>
                 <td className="px-4 py-3 text-amber-700 bg-amber-50/30">ไม่มี</td>
-                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">สูงสุด (สกัด 18+ AUs)</td>
+                <td className="px-4 py-3 text-purple-700 bg-purple-50/30">ไม่พร้อมใช้ (browser)</td>
               </tr>
             </tbody>
           </table>

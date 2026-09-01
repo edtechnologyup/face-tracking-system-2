@@ -1,5 +1,9 @@
 // MediaPipe face detection and tracking utilities
-import { FaceLandmarker, FilesetResolver, NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { FaceLandmarker, FilesetResolver, NormalizedLandmark, type Matrix } from '@mediapipe/tasks-vision';
+import { estimateGazeFromLandmarks, type IrisGazeEstimate } from './gaze-estimation';
+import { mapBlendshapesToActionUnits, type MappedActionUnits, type BlendshapeCategory } from './blendshape-action-units';
+import { computeLandmarkConfidence, computeMediapipeFrameConfidence, computeHeadPoseConfidence } from './mediapipe-quality';
+import { extractHeadPoseFromMatrix } from './mediapipe-head-pose';
 
 // ซ่อน TensorFlow Lite INFO messages
 const originalConsoleLog = console.log;
@@ -52,6 +56,8 @@ export const BRIGHTNESS_MIN_THRESHOLD = 0.20; // 6. Flag degraded lighting condi
 export const SUSTAINED_DURATION_SEC = 2; // 4. Filter out transient micro-movements (< 2s) before database logging
 export const EAR_THRESHOLD = 0.10; // 3. Lowered from 0.25 to 0.10 to prevent normal blinks being flagged
 export const HEAD_PITCH_DISENGAGEMENT_THRESHOLD = 10; // 3. Must be pitch > 10 alongside EAR < 0.10 for disengagement
+export const OCCLUSION_VALID_THRESHOLD = 0.5; // phase/isValid: face partially occluded above this
+export const OCCLUSION_SCENARIO_THRESHOLD = 0.8; // scenario label OCCLUSION above this
 
 export interface FaceTrackingData {
   isDetected: boolean;
@@ -64,6 +70,10 @@ export interface FaceTrackingData {
     direction?: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER';
   };
   confidence: number;
+  landmarkConfidence?: number | null;
+  headPoseConfidence?: number | null;
+  headRoll?: number | null;
+  orientationSource?: 'facialTransformationMatrix' | 'landmarkGeometry';
   realTime: string; // เวลาจริงในรูปแบบ HH:mm:ss
   landmarks?: NormalizedLandmark[];
   allFaceLandmarks?: NormalizedLandmark[][];
@@ -88,6 +98,8 @@ export interface FaceTrackingData {
     brightnessMean: number;
     isLowBrightness: boolean;
   };
+  gaze?: IrisGazeEstimate;
+  actionUnits?: MappedActionUnits | null;
 }
 
 // Interface สำหรับเก็บ Orientation Event ที่ละเอียด
@@ -249,8 +261,8 @@ export class MediaPipeDetector {
           modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
           delegate: "GPU"
         },
-        outputFaceBlendshapes: false, // ปิดก่อนเพื่อลดภาระ
-        outputFacialTransformationMatrixes: false, // ปิดก่อนเพื่อลดภาระ
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
         runningMode: "VIDEO",
         numFaces: 3 // เพิ่มเป็น 3 เพื่อตรวจสอบหลายใบหน้า
       });
@@ -278,10 +290,13 @@ export class MediaPipeDetector {
 
       this.faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
         baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
           delegate: "CPU"
         },
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
         runningMode: "VIDEO",
-        numFaces: 3 // เพิ่มเป็น 3 เพื่อตรวจสอบหลายใบหน้า
+        numFaces: 3
       });
 
       this.isInitialized = true;
@@ -497,7 +512,9 @@ export class MediaPipeDetector {
       // บันทึกว่าพบใบหน้าแล้ว (reset loss tracking)
       this.handleFaceDetectionRecovered();
       
-      const trackingData = this.analyzeLandmarks(landmarks);
+      const blendshapeCategories = results.faceBlendshapes?.[selectedFaceIdx]?.categories as BlendshapeCategory[] | undefined;
+      const transformMatrix = results.facialTransformationMatrixes?.[selectedFaceIdx];
+      const trackingData = this.analyzeLandmarks(landmarks, blendshapeCategories, transformMatrix);
       
       // เพิ่มข้อมูลหลายใบหน้า
       trackingData.multipleFaces = multipleFacesData;
@@ -626,15 +643,23 @@ export class MediaPipeDetector {
     };
   }
 
-  private analyzeLandmarks(landmarks: NormalizedLandmark[]): FaceTrackingData {
-    // คำนวณการหันหน้า (Face Orientation)
-    const orientation = this.calculateFaceOrientation(landmarks);
+  private analyzeLandmarks(
+    landmarks: NormalizedLandmark[],
+    blendshapeCategories?: BlendshapeCategory[],
+    transformMatrix?: Matrix
+  ): FaceTrackingData {
+    // คำนวณการหันหน้า (Face Orientation) — matrix L1 หรือ landmark fallback
+    const orientationResult = this.calculateFaceOrientation(landmarks, transformMatrix);
+    
+    // Iris + head gaze estimation
+    const gaze = estimateGazeFromLandmarks(landmarks);
+    const actionUnits = mapBlendshapesToActionUnits(blendshapeCategories);
     
     // คำนวณระยะห่างใบหน้าจากจอ
     const distance = this.calculateFaceDistance(landmarks);
 
     // คำนวณ Eye Aspect Ratio (EAR) และตรวจสอบ Disengagement ร่วมกับมุมก้ม (headPitch > 10)
-    const ear = this.calculateEAR(landmarks, orientation.pitch);
+    const ear = this.calculateEAR(landmarks, orientationResult.pitch);
     
     // สร้างเวลาจริง
     const realTime = new Date().toLocaleTimeString('th-TH', { 
@@ -644,38 +669,120 @@ export class MediaPipeDetector {
       second: '2-digit'
     });
     
-    // คำนวณระดับความมั่นใจแบบไดนามิก (ขึ้นอยู่กับองศาการหันศีรษะและระยะห่างจากกล้อง)
-    let dynamicConfidence = 0.98;
-    
-    // ยิ่งหันมาก ความมั่นใจจะลดลงเล็กน้อยตามการบดบังของใบหน้า (Occlusion)
-    dynamicConfidence -= (Math.abs(orientation.yaw) / 90) * 0.25;
-    dynamicConfidence -= (Math.abs(orientation.pitch) / 90) * 0.15;
-    
-    // ปรับลดความมั่นใจเพิ่มเติมตามระยะห่าง (ระยะเหมาะสม 40 - 70 ซม.)
-    if (distance) {
-      const dist = distance.estimatedCm;
-      if (dist < 40) {
-        dynamicConfidence -= (40 - dist) * 0.005; // ใกล้เกินไป
-      } else if (dist > 70) {
-        dynamicConfidence -= (dist - 70) * 0.005; // ไกลเกินไป
-      }
-    }
-    
-    // จำกัดค่าความมั่นใจให้อยู่ในช่วง 0.50 - 0.98
-    const finalConfidence = Math.max(0.50, Math.min(0.98, dynamicConfidence));
+    const landmarkConf = computeLandmarkConfidence(landmarks);
+    const frameConf = computeMediapipeFrameConfidence(landmarks, blendshapeCategories);
+    const matrixConf = orientationResult.headPoseConfidence;
+    const finalConfidence =
+      frameConf != null && matrixConf != null
+        ? Number(Math.min(1, frameConf * 0.7 + matrixConf * 0.3).toFixed(3))
+        : frameConf ?? matrixConf ?? landmarkConf ?? 0.5;
     
     return {
       isDetected: true,
-      orientation,
-      confidence: Number(finalConfidence.toFixed(3)),
+      orientation: {
+        yaw: orientationResult.yaw,
+        pitch: orientationResult.pitch,
+        isLookingAway: orientationResult.isLookingAway,
+        direction: orientationResult.direction,
+      },
+      confidence: finalConfidence,
+      landmarkConfidence: landmarkConf,
+      headPoseConfidence: orientationResult.headPoseConfidence,
+      headRoll: orientationResult.roll,
+      orientationSource: orientationResult.orientationSource,
       realTime,
-      landmarks, // ส่ง landmarks ทั้ง 468 จุดไปให้ component
+      landmarks,
       distance,
-      ear
+      ear,
+      gaze: gaze ?? undefined,
+      actionUnits: actionUnits ?? null,
     };
   }
 
-  private calculateFaceOrientation(landmarks: NormalizedLandmark[]) {
+  private calculateFaceOrientation(landmarks: NormalizedLandmark[], transformMatrix?: Matrix): {
+    yaw: number;
+    pitch: number;
+    roll: number | null;
+    isLookingAway: boolean;
+    direction: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER';
+    headPoseConfidence: number | null;
+    orientationSource: 'facialTransformationMatrix' | 'landmarkGeometry';
+  } {
+    const matrixPose = extractHeadPoseFromMatrix(transformMatrix);
+    if (matrixPose) {
+      return this.finalizeOrientationFromAngles(
+        matrixPose.yaw,
+        matrixPose.pitch,
+        matrixPose.roll,
+        matrixPose.confidence,
+        'facialTransformationMatrix'
+      );
+    }
+
+    return this.finalizeOrientationFromLandmarkGeometry(landmarks);
+  }
+
+  private finalizeOrientationFromAngles(
+    rawYaw: number,
+    rawPitch: number,
+    roll: number,
+    headPoseConfidence: number,
+    orientationSource: 'facialTransformationMatrix' | 'landmarkGeometry'
+  ) {
+    if (!this.calibrationComplete) {
+      this.calibrationPitchSamples.push(rawPitch);
+      this.calibrationYawSamples.push(rawYaw);
+      if (this.calibrationPitchSamples.length >= 30) {
+        const sortedPitch = [...this.calibrationPitchSamples].sort((a, b) => a - b);
+        const sortedYaw = [...this.calibrationYawSamples].sort((a, b) => a - b);
+        const trimCount = Math.floor(sortedPitch.length * 0.15);
+        const validPitch = sortedPitch.slice(trimCount, sortedPitch.length - trimCount);
+        const validYaw = sortedYaw.slice(trimCount, sortedYaw.length - trimCount);
+        this.neutralPitchBaseline = validPitch.reduce((a, b) => a + b, 0) / validPitch.length;
+        this.neutralYawBaseline = validYaw.reduce((a, b) => a + b, 0) / validYaw.length;
+        this.calibrationComplete = true;
+      }
+    }
+
+    const adjustedYaw = rawYaw - this.neutralYawBaseline;
+    let currentPitch = rawPitch - this.neutralPitchBaseline;
+    currentPitch = Math.max(-35, Math.min(35, currentPitch));
+
+    const smoothYaw = Number(this.yawFilter.filter(adjustedYaw).toFixed(1));
+    const smoothPitch = Number(this.pitchFilter.filter(currentPitch).toFixed(1));
+    this.smoothedYaw = smoothYaw;
+    this.smoothedPitch = smoothPitch;
+
+    const direction = this.getOrientationDirection(smoothYaw, smoothPitch);
+    this.currentDirection = direction;
+    const isLookingAway = direction !== 'CENTER';
+
+    if (this.isRecording) {
+      let frameConfidence = 0.98;
+      frameConfidence -= (Math.abs(smoothYaw) / 90) * 0.25;
+      frameConfidence -= (Math.abs(smoothPitch) / 90) * 0.15;
+      const finalFrameConfidence = Math.max(0.5, Math.min(0.98, frameConfidence));
+      this.recordOrientationEvent(direction, smoothYaw, smoothPitch, finalFrameConfidence);
+    }
+
+    if (this.onOrientationChange && direction !== this.lastSentDirection) {
+      const eventConf = orientationSource === 'facialTransformationMatrix' ? headPoseConfidence : 0.85;
+      this.onOrientationChange(direction, smoothYaw, smoothPitch, Number(eventConf.toFixed(3)));
+      this.lastSentDirection = direction;
+    }
+
+    return {
+      yaw: smoothYaw,
+      pitch: smoothPitch,
+      roll: Number(roll.toFixed(1)),
+      isLookingAway,
+      direction,
+      headPoseConfidence,
+      orientationSource,
+    };
+  }
+
+  private finalizeOrientationFromLandmarkGeometry(landmarks: NormalizedLandmark[]) {
     // ใช้จุดสำคัญตาม MediaPipe FaceMesh 468 landmarks
     const noseTip = landmarks[1];        // จมูกปลาย
     const leftEyeInner = landmarks[133]; // มุมในตาซ้าย
@@ -805,7 +912,22 @@ export class MediaPipeDetector {
       this.lastSentDirection = direction;
     }
 
-    return { yaw: smoothYaw, pitch: smoothPitch, isLookingAway, direction };
+    let roll: number | null = null;
+    if (landmarks[33] && landmarks[362]) {
+      const dx = landmarks[362].x - landmarks[33].x;
+      const dy = landmarks[362].y - landmarks[33].y;
+      roll = Number((Math.atan2(dy, dx) * (180 / Math.PI)).toFixed(1));
+    }
+
+    return {
+      yaw: smoothYaw,
+      pitch: smoothPitch,
+      roll,
+      isLookingAway,
+      direction,
+      headPoseConfidence: computeHeadPoseConfidence(landmarks),
+      orientationSource: 'landmarkGeometry' as const,
+    };
   }
 
   private calculateFaceDistance(landmarks: NormalizedLandmark[]) {

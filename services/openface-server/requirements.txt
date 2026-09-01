@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+Pillow==11.0.0
+gdown==5.2.0
+# openface-test runtime deps (installed without pulling CUDA torch / opencv-python GUI)
+click==8.1.7
+huggingface_hub==0.21.0
+timm==1.0.15
+tqdm==4.66.2
