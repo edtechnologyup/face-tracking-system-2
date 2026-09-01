@@ -40,6 +40,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   // State สำหรับ session management
   const sessionIdRef = useRef<string | null>(null)
   const isSessionSavedRef = useRef(false)
+  const benchmarkSyncCounterRef = useRef(0)
+  // Persist benchmark rows every 4 orientation syncs (~60s) to free DB writes for behavior logs
+  const BENCHMARK_SYNC_EVERY_N = 4
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
@@ -420,10 +423,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     stats: unknown, 
     faceDetectionLossStats?: { lossCount: number; totalLossTime: number }, 
     faceDetectionLossEvents?: unknown[],
-    isKeepAlive = false
+    isKeepAlive = false,
+    includeBenchmarkMetrics = true
   ) => {
     try {
-      setIsLoading(true)
+      if (!isKeepAlive) setIsLoading(true)
       const token = localStorage.getItem('token')
       if (!token) {
         throw new Error('ไม่พบ token การเข้าสู่ระบบ')
@@ -452,7 +456,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         isActive: false
       }))
 
-      const currentBenchmark = getBenchmarkMetrics()
+      const currentBenchmark = includeBenchmarkMetrics ? getBenchmarkMetrics() : null
 
       const response = await fetch('/api/tracking/orientation', {
         method: 'POST',
@@ -485,7 +489,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       setApiError(error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ')
       return null
     } finally {
-      setIsLoading(false)
+      if (!isKeepAlive) setIsLoading(false)
     }
   }, [getBenchmarkMetrics])
 
@@ -675,7 +679,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           const faceLossEvents = getFaceDetectionLossEvents()
 
           if (stats) {
-            saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true)
+            benchmarkSyncCounterRef.current += 1
+            const includeBenchmark = benchmarkSyncCounterRef.current % BENCHMARK_SYNC_EVERY_N === 0
+            saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true, includeBenchmark)
               .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
               .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
           }

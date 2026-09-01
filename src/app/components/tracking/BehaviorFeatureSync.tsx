@@ -48,12 +48,18 @@ export function BehaviorFeatureSync({
     startTime: Date.now()
   });
 
-  // Sample data at 1Hz (every 1000ms) เพื่อลดภาระ Database
+  // Capacity tuning for ~80 concurrent users (Pro Micro + Supavisor):
+  // 2Hz sampling, batch flush every 4s → 2 behavior rows/s/user, ~20 HTTP req/s total
+  const SAMPLE_INTERVAL_MS = 500
+  const SYNC_BATCH_SIZE = 8
+  const RETRY_BUFFER_MAX = 300
+
+  // Sample data at 2Hz (every 500ms) — doubled vs 1Hz while staying within 80-user DB budget
   useEffect(() => {
     if (!isActive || !sessionId) return
 
     const now = Date.now()
-    if (now - lastSampleTimeRef.current < 1000) return // Throttle to 1000ms
+    if (now - lastSampleTimeRef.current < SAMPLE_INTERVAL_MS) return
     lastSampleTimeRef.current = now
 
     const hasFace = !!(mediaPipeData?.isDetected || yoloData?.isDetected)
@@ -280,8 +286,8 @@ export function BehaviorFeatureSync({
 
     logBufferRef.current.push(logEntry)
 
-    // Auto-sync every 5 frames (approx 5 seconds)
-    if (logBufferRef.current.length >= 5) {
+    // Auto-sync every SYNC_BATCH_SIZE samples (~4 seconds at 2Hz)
+    if (logBufferRef.current.length >= SYNC_BATCH_SIZE) {
       const logsToSend = [...logBufferRef.current]
       logBufferRef.current = [] // reset buffer
       
@@ -295,8 +301,8 @@ export function BehaviorFeatureSync({
         })
       }).catch(err => {
         console.error('Failed to sync behavior features:', err)
-        // Re-queue failed logs back to buffer for retry (cap at 200 to prevent memory leak)
-        logBufferRef.current = [...logsToSend, ...logBufferRef.current].slice(0, 200)
+        // Re-queue failed logs back to buffer for retry
+        logBufferRef.current = [...logsToSend, ...logBufferRef.current].slice(0, RETRY_BUFFER_MAX)
       })
     }
   }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData, participantCode])
