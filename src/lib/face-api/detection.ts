@@ -12,6 +12,7 @@ if (typeof console !== 'undefined') {
 }
 
 import * as faceApiImport from "face-api.js";
+import { EAR_THRESHOLD, HEAD_PITCH_DISENGAGEMENT_THRESHOLD } from '../mediapipe-detector';
 
 // แก้ปัญหาการนำเข้า face-api.js ใน Next.js (รองรับทั้ง ESM และ CommonJS)
 const faceApiImportUnknown: unknown = faceApiImport;
@@ -331,6 +332,54 @@ function detectBlinking(landmarks: faceApiImport.FaceLandmarks68): boolean {
   });
   
   return avgEAR < blinkThreshold;
+}
+
+/**
+ * ตรวจสอบภาวะไม่มีส่วนร่วม (Disengagement) ตามเกณฑ์ CBMI
+ * ต้องเข้าเงื่อนไข EAR < 0.10 และ headPitch > 10 องศาพร้อมกันเท่านั้น
+ */
+export function checkEyeDisengagement(
+  landmarks: faceApiImport.FaceLandmarks68,
+  headPitch: number
+): { isDisengaged: boolean; avgEAR: number; leftEAR: number; rightEAR: number } {
+  const positions = landmarks.positions;
+  const leftEyePoints = {
+    p1: positions[36],
+    p2: positions[37],
+    p3: positions[38],
+    p4: positions[39],
+    p5: positions[40],
+    p6: positions[41]
+  };
+  const rightEyePoints = {
+    p1: positions[42],
+    p2: positions[43],
+    p3: positions[44],
+    p4: positions[45],
+    p5: positions[46],
+    p6: positions[47]
+  };
+
+  const calculateEARInternal = (eye: typeof leftEyePoints) => {
+    const v1 = Math.sqrt(Math.pow(eye.p2.x - eye.p6.x, 2) + Math.pow(eye.p2.y - eye.p6.y, 2));
+    const v2 = Math.sqrt(Math.pow(eye.p3.x - eye.p5.x, 2) + Math.pow(eye.p3.y - eye.p5.y, 2));
+    const h = Math.sqrt(Math.pow(eye.p1.x - eye.p4.x, 2) + Math.pow(eye.p1.y - eye.p4.y, 2)) || 1;
+    return (v1 + v2) / (2 * h);
+  };
+
+  const leftEAR = calculateEARInternal(leftEyePoints);
+  const rightEAR = calculateEARInternal(rightEyePoints);
+  const avgEAR = (leftEAR + rightEAR) / 2;
+
+  // CBMI Guide: Flag disengagement ONLY if EAR < 0.10 AND headPitch > 10 simultaneously
+  const isDisengaged = avgEAR < EAR_THRESHOLD && headPitch > HEAD_PITCH_DISENGAGEMENT_THRESHOLD;
+
+  return {
+    isDisengaged,
+    avgEAR: Number(avgEAR.toFixed(3)),
+    leftEAR: Number(leftEAR.toFixed(3)),
+    rightEAR: Number(rightEAR.toFixed(3))
+  };
 }
 
 /**

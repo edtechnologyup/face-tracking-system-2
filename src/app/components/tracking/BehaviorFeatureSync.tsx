@@ -3,11 +3,12 @@ import { useEffect, useRef } from 'react'
 import { analyzeImageQuality } from '@/lib/image-quality'
 import { calculateOcclusionScore } from '@/lib/occlusion-utils'
 
-// CBMI Parameter Adjustment Guide: เกณฑ์ภาวะไม่มีส่วนร่วม (Disengagement) - ต้องเข้าเงื่อนไขทั้งดวงตาและมุมก้มศีรษะพร้อมกัน
-const EAR_DISENGAGEMENT_THRESHOLD = 0.10
-const HEAD_PITCH_DISENGAGEMENT_THRESHOLD = 10
-// CBMI Parameter Adjustment Guide: ความสว่างขั้นต่ำที่ยอมรับได้ของเฟรม
-const BRIGHTNESS_MIN_THRESHOLD = 0.20
+import {
+  YAW_THRESHOLD,
+  EAR_THRESHOLD as EAR_DISENGAGEMENT_THRESHOLD,
+  HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
+  BRIGHTNESS_MIN_THRESHOLD
+} from "@/lib/mediapipe-detector";
 
 export interface BehaviorFeatureSyncProps {
   participantCode?: string;
@@ -94,8 +95,8 @@ export function BehaviorFeatureSync({
     const yaw = mediaPipeData?.orientation?.yaw || 0;
     const pitch = mediaPipeData?.orientation?.pitch || 0;
     
-    if (yaw < -15) currentDirection = 'LEFT';
-    else if (yaw > 15) currentDirection = 'RIGHT';
+    if (yaw < -YAW_THRESHOLD) currentDirection = 'LEFT';
+    else if (yaw > YAW_THRESHOLD) currentDirection = 'RIGHT';
     else if (pitch > 15) currentDirection = 'DOWN'; // Assuming positive pitch is looking down
     
     if (attentionStateRef.current.direction !== currentDirection) {

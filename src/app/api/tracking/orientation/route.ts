@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 import { rateLimit } from '@/lib/utils/rate-limiter'
+import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
 
 // Interface สำหรับ request body
 interface OrientationEvent {
@@ -56,8 +57,7 @@ interface OrientationLogRequest {
   benchmarkMetrics?: Record<string, unknown>;
 }
 
-// CBMI Parameter Adjustment Guide: ข้าม event ที่มีระยะเวลาสั้นกว่าเกณฑ์นี้ก่อนบันทึกลงฐานข้อมูล (ป้องกัน noise จากการหันหน้า/หลุด face สั้นๆ)
-const SUSTAINED_DURATION_SEC = 2
+// CBMI Parameter Adjustment Guide: ข้าม event ที่มีระยะเวลาสั้นกว่า SUSTAINED_DURATION_SEC ก่อนบันทึกลงฐานข้อมูล
 
 // บันทึกข้อมูล orientation tracking
 export async function POST(request: NextRequest) {

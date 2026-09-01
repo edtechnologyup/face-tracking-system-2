@@ -9,6 +9,7 @@ import { useCamera } from '@/hooks/useCamera'
 import { BehaviorFeatureSync } from "./BehaviorFeatureSync"
 import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
 import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
+import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
 import toast from 'react-hot-toast'
 
 interface FaceTrackerProps {
@@ -439,6 +440,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         confidence?: number;
       }>)
       .filter(event => event.direction !== 'CENTER') // กรอง CENTER ออก
+        .filter(event => typeof event.duration !== 'number' || event.duration >= SUSTAINED_DURATION_SEC)
       .map(event => ({
         startTime: event.startTime,
         endTime: event.endTime,
@@ -595,6 +597,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         confidence?: number;
       }>) || [])
         .filter(event => event.direction !== 'CENTER')
+        .filter(event => typeof event.duration !== 'number' || event.duration >= SUSTAINED_DURATION_SEC)
         .map(event => ({
           startTime: event.startTime,
           endTime: event.endTime,

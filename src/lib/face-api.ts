@@ -7,6 +7,7 @@ export {
   loadFaceApiModels,
   detectFaceAndGetDescriptor,
   detectFacePose,
+  checkEyeDisengagement,
   isModelsLoaded,
   resetModelState,
   
