@@ -3,7 +3,7 @@ import {
   type BehaviorScenarioLabel,
   type RuleLabelInput,
 } from '@/lib/behavior-rule-labeler';
-import { YAW_THRESHOLD, SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector';
+import { YAW_THRESHOLD, SUSTAINED_DURATION_SEC } from '@/lib/cbmi-parameters';
 
 export interface ScenarioRegressionCase {
   id: string;

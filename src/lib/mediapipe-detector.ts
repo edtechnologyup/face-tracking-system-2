@@ -6,6 +6,16 @@ import { computeLandmarkConfidence, computeMediapipeFrameConfidence, computeHead
 import { extractHeadPoseFromMatrix } from './mediapipe-head-pose';
 import { analyzeImageQuality } from './image-quality';
 import { evaluateCbmiValidity } from './cbmi-validity';
+import {
+  YAW_THRESHOLD,
+  PITCH_UP_THRESHOLD,
+  PITCH_DOWN_THRESHOLD,
+  HYSTERESIS_MARGIN,
+  DISTANCE_THRESHOLD_CM,
+  SUSTAINED_DURATION_SEC,
+  EAR_THRESHOLD,
+  HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
+} from '@/lib/cbmi-parameters';
 
 // ซ่อน TensorFlow Lite INFO messages
 const originalConsoleLog = console.log;
@@ -48,19 +58,7 @@ console.error = (...args) => {
   originalConsoleError.apply(console, args);
 };
 
-// CBMI Research Parameter Thresholds (from cbmi-parameter-guide.html)
-import {
-  YAW_THRESHOLD,
-  PITCH_UP_THRESHOLD,
-  PITCH_DOWN_THRESHOLD,
-  HYSTERESIS_MARGIN,
-  DISTANCE_THRESHOLD_CM,
-  BRIGHTNESS_MIN_THRESHOLD,
-  SUSTAINED_DURATION_SEC,
-  EAR_THRESHOLD,
-  HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
-} from './cbmi-parameters';
-
+/** Re-export CBMI thresholds — canonical source is `@/lib/cbmi-parameters`. */
 export {
   YAW_THRESHOLD,
   PITCH_UP_THRESHOLD,
@@ -80,7 +78,7 @@ export {
   GAZE_MIN_CONFIDENCE,
   OCCLUSION_VALID_THRESHOLD,
   OCCLUSION_SCENARIO_THRESHOLD,
-} from './cbmi-parameters';
+} from '@/lib/cbmi-parameters';
 
 export interface FaceTrackingData {
   isDetected: boolean;
@@ -267,17 +265,6 @@ export class MediaPipeDetector {
   private onOrientationChange?: (direction: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER', yaw: number, pitch: number, confidence: number) => void;
   private onFaceDetectionLoss?: (confidence: number) => void;
   private lastSentDirection: string = '';
-  
-  // Thresholds & Hysteresis Margins for direction detection (CBMI Guide)
-  private readonly YAW_THRESHOLD = YAW_THRESHOLD;
-  private readonly PITCH_UP_THRESHOLD = PITCH_UP_THRESHOLD;
-  private readonly PITCH_DOWN_THRESHOLD = PITCH_DOWN_THRESHOLD;
-  private readonly HYSTERESIS_MARGIN = HYSTERESIS_MARGIN;
-  private readonly DISTANCE_THRESHOLD_CM = DISTANCE_THRESHOLD_CM;
-  private readonly BRIGHTNESS_MIN_THRESHOLD = BRIGHTNESS_MIN_THRESHOLD;
-  private readonly SUSTAINED_DURATION_SEC = SUSTAINED_DURATION_SEC;
-  private readonly EAR_THRESHOLD = EAR_THRESHOLD;
-  private readonly HEAD_PITCH_DISENGAGEMENT_THRESHOLD = HEAD_PITCH_DISENGAGEMENT_THRESHOLD;
 
   // Offscreen canvas for fast brightness/luminance sampling
   private brightnessCanvas: HTMLCanvasElement | null = null;
@@ -727,7 +714,7 @@ export class MediaPipeDetector {
     const avgEAR = Number(((leftEAR + rightEAR) / 2).toFixed(3));
 
     // CBMI Guide: Flag disengagement ONLY if EAR < 0.10 AND headPitch > 10 simultaneously
-    const isDisengaged = avgEAR < this.EAR_THRESHOLD && headPitch > this.HEAD_PITCH_DISENGAGEMENT_THRESHOLD;
+    const isDisengaged = avgEAR < EAR_THRESHOLD && headPitch > HEAD_PITCH_DISENGAGEMENT_THRESHOLD;
 
     return {
       leftEAR,
@@ -1046,7 +1033,7 @@ export class MediaPipeDetector {
     const estimatedCm = (distanceFromWidth + distanceFromHeight) / 2;
     
     // ตรวจสอบว่าระยะห่างเกิน 70cm หรือไม่ (CBMI Guide: ปรับจาก 80cm เหลือ 70cm)
-    const isTooFar = estimatedCm > this.DISTANCE_THRESHOLD_CM;
+    const isTooFar = estimatedCm > DISTANCE_THRESHOLD_CM;
     
     return {
       estimatedCm: Math.round(estimatedCm),
@@ -1059,26 +1046,26 @@ export class MediaPipeDetector {
   // === Orientation Tracking Methods ===
   
   private getOrientationDirection(yaw: number, pitch: number): 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'CENTER' {
-    const margin = this.HYSTERESIS_MARGIN;
+    const margin = HYSTERESIS_MARGIN;
 
     // 1. Hysteresis Check: หากอยู่ในทิศทางเดิมอยู่แล้ว ให้คงสถานะไว้จนกว่าจะลดลงต่ำกว่าเกณฑ์
     if (this.currentDirection === 'RIGHT') {
-      if (yaw > (this.YAW_THRESHOLD - margin) && Math.abs(yaw) >= Math.abs(pitch) - margin) return 'RIGHT';
+      if (yaw > (YAW_THRESHOLD - margin) && Math.abs(yaw) >= Math.abs(pitch) - margin) return 'RIGHT';
     } else if (this.currentDirection === 'LEFT') {
-      if (yaw < -(this.YAW_THRESHOLD - margin) && Math.abs(yaw) >= Math.abs(pitch) - margin) return 'LEFT';
+      if (yaw < -(YAW_THRESHOLD - margin) && Math.abs(yaw) >= Math.abs(pitch) - margin) return 'LEFT';
     } else if (this.currentDirection === 'UP') {
-      if (pitch > (this.PITCH_UP_THRESHOLD - margin) && pitch >= Math.abs(yaw) - margin) return 'UP';
+      if (pitch > (PITCH_UP_THRESHOLD - margin) && pitch >= Math.abs(yaw) - margin) return 'UP';
     } else if (this.currentDirection === 'DOWN') {
-      if (pitch < -(this.PITCH_DOWN_THRESHOLD - margin) && Math.abs(pitch) >= Math.abs(yaw) - margin) return 'DOWN';
+      if (pitch < -(PITCH_DOWN_THRESHOLD - margin) && Math.abs(pitch) >= Math.abs(yaw) - margin) return 'DOWN';
     }
 
     // 2. Dominant Axis Priority: เปรียบเทียบแกนหลักในการเคลื่อนที่เมื่อมีการเฉียง (เช่น หันซ้าย + เงยหน้านิดนึง)
     const absYaw = Math.abs(yaw);
     const absPitch = Math.abs(pitch);
 
-    const isYawActive = absYaw > this.YAW_THRESHOLD;
-    const isPitchUpActive = pitch > this.PITCH_UP_THRESHOLD;
-    const isPitchDownActive = pitch < -this.PITCH_DOWN_THRESHOLD;
+    const isYawActive = absYaw > YAW_THRESHOLD;
+    const isPitchUpActive = pitch > PITCH_UP_THRESHOLD;
+    const isPitchDownActive = pitch < -PITCH_DOWN_THRESHOLD;
 
     // หากเกินเกณฑ์ทั้งสองแกนพร้อมกัน ให้ตัดตามแกนที่หันเอียงมากกว่า (Dominant Vector)
     if (isYawActive && (isPitchUpActive || isPitchDownActive)) {
@@ -1277,7 +1264,7 @@ export class MediaPipeDetector {
   /**
    * Return orientation events sustained for at least minDurationSec (CBMI Guide: 2 sec filter)
    */
-  getSustainedOrientationEvents(minDurationSec: number = this.SUSTAINED_DURATION_SEC): OrientationEvent[] {
+  getSustainedOrientationEvents(minDurationSec: number = SUSTAINED_DURATION_SEC): OrientationEvent[] {
     return this.orientationHistory.filter((event) =>
       (event.duration || 0) >= minDurationSec
     );

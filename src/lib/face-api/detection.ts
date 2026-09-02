@@ -12,7 +12,7 @@ if (typeof console !== 'undefined') {
 }
 
 import * as faceApiImport from "face-api.js";
-import { EAR_THRESHOLD, HEAD_PITCH_DISENGAGEMENT_THRESHOLD } from '../mediapipe-detector';
+import { EAR_THRESHOLD, HEAD_PITCH_DISENGAGEMENT_THRESHOLD } from '@/lib/cbmi-parameters';
 
 // แก้ปัญหาการนำเข้า face-api.js ใน Next.js (รองรับทั้ง ESM และ CommonJS)
 const faceApiImportUnknown: unknown = faceApiImport;

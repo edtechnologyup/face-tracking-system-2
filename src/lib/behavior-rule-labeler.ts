@@ -12,7 +12,7 @@ import {
   DISTANCE_THRESHOLD_CM,
   EAR_THRESHOLD,
   HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
-} from '@/lib/mediapipe-detector';
+} from '@/lib/cbmi-parameters';
 import {
   evaluateCbmiValidity,
   resolveEffectiveAttentionDirection,

@@ -1,7 +1,7 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { computeLandmarkQuality } from '@/lib/mediapipe-quality';
 import { calculateOcclusionScore } from '@/lib/occlusion-utils';
-import { DISTANCE_THRESHOLD_CM } from '@/lib/mediapipe-detector';
+import { DISTANCE_THRESHOLD_CM } from '@/lib/cbmi-parameters';
 
 /** ค่า focal length เริ่มต้นสำหรับ webcam ทั่วไป (pixels) */
 export const DEFAULT_FOCAL_LENGTH_PX = 550;
