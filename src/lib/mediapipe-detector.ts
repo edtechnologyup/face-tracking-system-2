@@ -1278,7 +1278,9 @@ export class MediaPipeDetector {
    * Return orientation events sustained for at least minDurationSec (CBMI Guide: 2 sec filter)
    */
   getSustainedOrientationEvents(minDurationSec: number = this.SUSTAINED_DURATION_SEC): OrientationEvent[] {
-    return this.orientationHistory.filter(event => (event.duration || 0) >= minDurationSec);
+    return this.orientationHistory.filter((event) =>
+      (event.duration || 0) >= minDurationSec
+    );
   }
   
   isCurrentlyRecording(): boolean {

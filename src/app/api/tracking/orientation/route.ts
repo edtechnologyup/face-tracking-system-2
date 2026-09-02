@@ -6,6 +6,7 @@ import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limiter'
 import { persistSyncedBenchmarkLogs } from '@/lib/benchmark-log-persist'
 import {
   filterNewTrackingLogs,
+  filterOrientationEventsForTrackingLog,
   fingerprintFromExistingLog,
 } from '@/lib/tracking-log-dedup'
 import type { MultiEngineBenchmarkPayload } from '@/lib/engine-benchmark'
@@ -62,7 +63,7 @@ interface OrientationLogRequest {
   benchmarkMetrics?: MultiEngineBenchmarkPayload;
 }
 
-// บันทึก event-level logs แบบเดียวกับ tracking_logs ใน CSV export (ทุก completed event)
+// บันทึก FACE_ORIENTATION ใน tracking_logs เฉพาะ event ที่ duration ≥ SUSTAINED_DURATION_SEC (CBMI Guide §3)
 
 // บันทึกข้อมูล orientation tracking
 export async function POST(request: NextRequest) {
@@ -115,9 +116,10 @@ export async function POST(request: NextRequest) {
     // เตรียมข้อมูล logs ทั้งหมด
     const logsData: Prisma.TrackingLogCreateManyInput[] = []
 
-    // 1. เพิ่ม orientation events (completed events — รวม duration สั้น ๆ เหมือน CSV export)
-    events.forEach(event => {
-      if (event.isActive || !event.endTime) return
+    const sustainedOrientationEvents = filterOrientationEventsForTrackingLog(events)
+
+    // 1. เพิ่ม orientation events (sustained ≥ 2s — กรอง micro-movements ตาม CBMI Guide)
+    sustainedOrientationEvents.forEach(event => {
       logsData.push({
         sessionId: sessionId,
         detectionType: 'FACE_ORIENTATION',
@@ -296,7 +298,10 @@ export async function POST(request: NextRequest) {
       message: `บันทึก logs ทั้งหมด ${logsCreated} รายการ สำเร็จ`,
       data: {
         logsCreated: logsCreated,
-        orientationLogsCreated: events.length,
+        orientationEventsReceived: events.length,
+        orientationLogsEligible: sustainedOrientationEvents.length,
+        orientationLogsCreated: logsCreated,
+        orientationLogsSkippedShort: events.length - sustainedOrientationEvents.length,
         faceDetectionLossLogCreated: lossLogsCount,
         benchmarkPersist,
         sessionStatistics: sessionStatistics,

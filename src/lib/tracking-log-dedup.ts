@@ -1,6 +1,27 @@
 import type { DetectionType, Prisma } from '@prisma/client'
+import { SUSTAINED_DURATION_SEC } from '@/lib/cbmi-parameters'
 
 type JsonObject = Record<string, unknown>
+
+/** CBMI Guide Section 3: only persist orientation events sustained ≥ minDurationSec. */
+export function isSustainedOrientationEvent(
+  duration: number | null | undefined,
+  minDurationSec: number = SUSTAINED_DURATION_SEC
+): boolean {
+  return (duration ?? 0) >= minDurationSec
+}
+
+export function filterOrientationEventsForTrackingLog<
+  T extends { direction: string; endTime?: string; duration?: number; isActive?: boolean },
+>(events: T[], minDurationSec: number = SUSTAINED_DURATION_SEC): T[] {
+  return events.filter(
+    (event) =>
+      !event.isActive &&
+      event.direction !== 'CENTER' &&
+      Boolean(event.endTime) &&
+      isSustainedOrientationEvent(event.duration, minDurationSec)
+  )
+}
 
 /** Stable key per logical event — used for append-only dedup across 15s syncs. */
 export function buildTrackingLogFingerprint(
