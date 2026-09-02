@@ -1,5 +1,8 @@
 // Face mesh drawing utilities for MediaPipe FaceLandmarker
 import { FaceTrackingData } from './mediapipe-detector'
+import {
+  calcVideoDisplayCoordinates,
+} from './video-display-coordinates'
 
 // MediaPipe landmark type
 interface Landmark {
@@ -59,38 +62,19 @@ export interface DrawingColors {
   glow: string
 }
 
-// คำนวณ scaling และ offset สำหรับ aspect ratio
+// คำนวณ scaling และ offset ให้ตรงกับ CSS object-fit: cover บน video element
 export function calculateCoordinates(
   video: HTMLVideoElement | null,
   canvasWidth: number,
   canvasHeight: number
 ): DrawingCoordinates {
-  let scaleX = canvasWidth
-  let scaleY = canvasHeight
-  let offsetX = 0
-  let offsetY = 0
-  
-  if (video && video.videoWidth && video.videoHeight && canvasWidth > 0 && canvasHeight > 0) {
-    const videoAspect = video.videoWidth / video.videoHeight
-    const canvasAspect = canvasWidth / canvasHeight
-    
-    // หากความต่างของ aspect ratio เกิน threshold (0.01) จึงจะคำนวณ letterbox
-    if (Math.abs(videoAspect - canvasAspect) > 0.01) {
-      if (videoAspect > canvasAspect) {
-        // Video กว้างกว่า canvas - มี letterbox บนล่าง
-        scaleX = canvasWidth
-        scaleY = canvasWidth / videoAspect
-        offsetY = (canvasHeight - scaleY) / 2
-      } else {
-        // Video สูงกว่า canvas - มี letterbox ซ้ายขวา
-        scaleX = canvasHeight * videoAspect
-        scaleY = canvasHeight
-        offsetX = (canvasWidth - scaleX) / 2
-      }
-    }
+  const coords = calcVideoDisplayCoordinates(video, canvasWidth, canvasHeight, 'cover')
+  return {
+    scaleX: coords.scaleX,
+    scaleY: coords.scaleY,
+    offsetX: coords.offsetX,
+    offsetY: coords.offsetY,
   }
-  
-  return { scaleX, scaleY, offsetX, offsetY }
 }
 
 // สร้างสีตามสถานะการมอง

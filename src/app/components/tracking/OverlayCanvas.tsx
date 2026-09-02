@@ -7,35 +7,39 @@ interface OverlayCanvasProps {
 
 export const OverlayCanvas = forwardRef<HTMLCanvasElement, OverlayCanvasProps>(
   ({ videoRef }, ref) => {
-    // อัปเดตขนาด canvas ให้ตรงกับ video element เสมอ
     useEffect(() => {
       const video = videoRef.current
       const canvas = (ref as React.RefObject<HTMLCanvasElement | null>)?.current
-      
-      if (video && canvas) {
-        const updateCanvasSize = () => {
-          const videoRect = video.getBoundingClientRect()
-          const vw = video.offsetWidth || videoRect.width
-          const vh = video.offsetHeight || videoRect.height
-          if (vw > 0 && vh > 0 && (canvas.width !== vw || canvas.height !== vh)) {
-            canvas.width = vw
-            canvas.height = vh
-          }
-        }
-        
-        video.addEventListener('loadedmetadata', updateCanvasSize)
-        video.addEventListener('resize', updateCanvasSize)
-        video.addEventListener('playing', updateCanvasSize)
-        window.addEventListener('resize', updateCanvasSize)
+      const container = video?.parentElement
 
-        updateCanvasSize()
+      if (!video || !canvas || !container) return
 
-        return () => {
-          video.removeEventListener('loadedmetadata', updateCanvasSize)
-          video.removeEventListener('resize', updateCanvasSize)
-          video.removeEventListener('playing', updateCanvasSize)
-          window.removeEventListener('resize', updateCanvasSize)
+      const updateCanvasSize = () => {
+        const rect = container.getBoundingClientRect()
+        const cw = Math.round(rect.width)
+        const ch = Math.round(rect.height)
+        if (cw > 0 && ch > 0 && (canvas.width !== cw || canvas.height !== ch)) {
+          canvas.width = cw
+          canvas.height = ch
         }
+      }
+
+      const resizeObserver = new ResizeObserver(updateCanvasSize)
+      resizeObserver.observe(container)
+
+      video.addEventListener('loadedmetadata', updateCanvasSize)
+      video.addEventListener('resize', updateCanvasSize)
+      video.addEventListener('playing', updateCanvasSize)
+      window.addEventListener('resize', updateCanvasSize)
+
+      updateCanvasSize()
+
+      return () => {
+        resizeObserver.disconnect()
+        video.removeEventListener('loadedmetadata', updateCanvasSize)
+        video.removeEventListener('resize', updateCanvasSize)
+        video.removeEventListener('playing', updateCanvasSize)
+        window.removeEventListener('resize', updateCanvasSize)
       }
     }, [videoRef, ref])
 

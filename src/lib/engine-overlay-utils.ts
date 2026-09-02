@@ -5,76 +5,20 @@ import type { OpenFaceDetectionResult } from '@/lib/engines/openface-detector'
 import type { L2CSGazeResult } from '@/lib/engines/l2cs-gaze-detector'
 import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
 import type { OverlayMode } from '@/lib/tracking-profile'
+import {
+  calcVideoDisplayCoordinates,
+  videoPixelToCanvas,
+  type VideoDisplayCoordinates,
+} from '@/lib/video-display-coordinates'
 
-export interface OverlayCoordinates {
-  scaleX: number
-  scaleY: number
-  offsetX: number
-  offsetY: number
-  videoWidth: number
-  videoHeight: number
-  canvasWidth: number
-  canvasHeight: number
-}
+export type OverlayCoordinates = VideoDisplayCoordinates
 
 export function calcOverlayCoordinates(
   video: HTMLVideoElement,
   canvasWidth: number,
   canvasHeight: number
 ): OverlayCoordinates {
-  const vw = canvasWidth
-  const vh = canvasHeight
-  const videoWidth = video.videoWidth || 640
-  const videoHeight = video.videoHeight || 480
-
-  const aspectMismatch =
-    video.videoWidth &&
-    video.videoHeight &&
-    Math.abs(video.videoWidth / video.videoHeight - vw / vh) > 0.01
-
-  if (!aspectMismatch) {
-    return {
-      scaleX: vw,
-      scaleY: vh,
-      offsetX: 0,
-      offsetY: 0,
-      videoWidth,
-      videoHeight,
-      canvasWidth: vw,
-      canvasHeight: vh,
-    }
-  }
-
-  const videoAspect = video.videoWidth / video.videoHeight
-  const canvasAspect = vw / vh
-
-  if (videoAspect > canvasAspect) {
-    const scaleX = vw
-    const scaleY = vw / videoAspect
-    return {
-      scaleX,
-      scaleY,
-      offsetX: 0,
-      offsetY: (vh - scaleY) / 2,
-      videoWidth,
-      videoHeight,
-      canvasWidth: vw,
-      canvasHeight: vh,
-    }
-  }
-
-  const scaleY = vh
-  const scaleX = vh * videoAspect
-  return {
-    scaleX,
-    scaleY,
-    offsetX: (vw - scaleX) / 2,
-    offsetY: 0,
-    videoWidth,
-    videoHeight,
-    canvasWidth: vw,
-    canvasHeight: vh,
-  }
+  return calcVideoDisplayCoordinates(video, canvasWidth, canvasHeight, 'cover')
 }
 
 function toCanvas(
@@ -82,10 +26,7 @@ function toCanvas(
   y: number,
   coords: OverlayCoordinates
 ): { x: number; y: number } {
-  return {
-    x: (x / coords.videoWidth) * coords.scaleX + coords.offsetX,
-    y: (y / coords.videoHeight) * coords.scaleY + coords.offsetY,
-  }
+  return videoPixelToCanvas(x, y, coords)
 }
 
 function drawEngineLabel(
