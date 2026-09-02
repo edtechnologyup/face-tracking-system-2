@@ -36,12 +36,23 @@ function drawEngineLabel(
   y: number,
   color: string
 ) {
+  ctx.save()
   ctx.font = 'bold 11px Inter, sans-serif'
   const width = ctx.measureText(text).width + 10
+  const labelTop = Math.max(0, y - 20)
+  const textBaselineY = Math.max(12, y - 6)
+  const centerX = x + width / 2
+
+  // Canvas ถูก mirror ด้วย CSS scaleX(-1) — flip label กลับเพื่อให้อ่านได้
+  ctx.translate(centerX, 0)
+  ctx.scale(-1, 1)
+  ctx.translate(-centerX, 0)
+
   ctx.fillStyle = color
-  ctx.fillRect(x, Math.max(0, y - 20), width, 18)
+  ctx.fillRect(x, labelTop, width, 18)
   ctx.fillStyle = '#FFFFFF'
-  ctx.fillText(text, x + 5, Math.max(12, y - 6))
+  ctx.fillText(text, x + 5, textBaselineY)
+  ctx.restore()
 }
 
 function drawGazeVector(

@@ -20,7 +20,6 @@ import {
   type EngineBenchmarkMetric,
 } from '@/lib/engine-benchmark'
 import { drawAllEngineOverlays } from '@/lib/engine-overlay-utils'
-import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
 import toast from 'react-hot-toast'
 
 function BenchmarkEngineMobileCard({
@@ -427,7 +426,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         throw new Error('ไม่มีข้อมูลสถิติ session')
       }
 
-      // แปลงข้อมูล events ให้ตรงกับ API format (กรอง CENTER ออก)
+      // แปลงข้อมูล events ให้ตรงกับ API format (กรอง CENTER + ส่งเฉพาะ event ที่จบแล้ว)
       const orientationEvents = (events as Array<{
         startTime: string;
         endTime: string;
@@ -437,8 +436,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         maxPitch?: number;
         confidence?: number;
       }>)
-      .filter(event => event.direction !== 'CENTER') // กรอง CENTER ออก
-        .filter(event => typeof event.duration !== 'number' || event.duration >= SUSTAINED_DURATION_SEC)
+      .filter(event => event.direction !== 'CENTER')
+      .filter(event => Boolean(event.endTime))
       .map(event => ({
         startTime: event.startTime,
         endTime: event.endTime,
@@ -642,7 +641,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         confidence?: number;
       }>) || [])
         .filter(event => event.direction !== 'CENTER')
-        .filter(event => typeof event.duration !== 'number' || event.duration >= SUSTAINED_DURATION_SEC)
+        .filter(event => Boolean(event.endTime))
         .map(event => ({
           startTime: event.startTime,
           endTime: event.endTime,
