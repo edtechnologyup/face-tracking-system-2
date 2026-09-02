@@ -20,6 +20,7 @@ import {
   type EngineBenchmarkMetric,
 } from '@/lib/engine-benchmark'
 import { drawAllEngineOverlays } from '@/lib/engine-overlay-utils'
+import { filterOrientationEventsForTrackingLog } from '@/lib/tracking-log-dedup'
 import toast from 'react-hot-toast'
 
 function BenchmarkEngineMobileCard({
@@ -426,19 +427,18 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         throw new Error('ไม่มีข้อมูลสถิติ session')
       }
 
-      // แปลงข้อมูล events ให้ตรงกับ API format (กรอง CENTER + ส่งเฉพาะ event ที่จบแล้ว)
-      const orientationEvents = (events as Array<{
-        startTime: string;
-        endTime: string;
-        direction: string;
-        duration: number;
-        maxYaw?: number;
-        maxPitch?: number;
-        confidence?: number;
-      }>)
-      .filter(event => event.direction !== 'CENTER')
-      .filter(event => Boolean(event.endTime))
-      .map(event => ({
+      // แปลงข้อมูล events — กรอง CENTER + duration < 2s (CBMI Guide §3)
+      const orientationEvents = filterOrientationEventsForTrackingLog(
+        (events as Array<{
+          startTime: string;
+          endTime: string;
+          direction: string;
+          duration: number;
+          maxYaw?: number;
+          maxPitch?: number;
+          confidence?: number;
+        }>) || []
+      ).map(event => ({
         startTime: event.startTime,
         endTime: event.endTime,
         direction: event.direction,
@@ -631,18 +631,17 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       const faceDetectionLossStats = getFaceDetectionLossStats()
       const faceDetectionLossEvents = getFaceDetectionLossEvents()
       
-      const orientationEvents = ((events as Array<{
-        startTime: string;
-        endTime: string;
-        direction: string;
-        duration: number;
-        maxYaw?: number;
-        maxPitch?: number;
-        confidence?: number;
-      }>) || [])
-        .filter(event => event.direction !== 'CENTER')
-        .filter(event => Boolean(event.endTime))
-        .map(event => ({
+      const orientationEvents = filterOrientationEventsForTrackingLog(
+        (events as Array<{
+          startTime: string;
+          endTime: string;
+          direction: string;
+          duration: number;
+          maxYaw?: number;
+          maxPitch?: number;
+          confidence?: number;
+        }>) || []
+      ).map(event => ({
           startTime: event.startTime,
           endTime: event.endTime,
           direction: event.direction,

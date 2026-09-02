@@ -51,7 +51,7 @@ This is a Next.js 15 tracking system with face recognition authentication and be
 
 **✅ Completed Features (Updated):**
 - **MediaPipe Face Tracking**: Real-time face orientation detection with 468-point landmark analysis
-- **Face Orientation Monitoring**: Looking away detection with threshold-based algorithms (±20° yaw, ±15° pitch)
+- **Face Orientation Monitoring**: Looking away detection with CBMI thresholds (±20° yaw, pitch up/down 14°/12°) plus **EYES_CLOSED_DISENGAGED** when avgEAR < 0.10 AND headPitch > 10° simultaneously
 - **Sci-Fi Visualization Interface**: Advanced mesh rendering with color-coded status indicators
 - **Live Analytics Dashboard**: Real-time statistics including detection counts and attention rates
 - **Performance Optimized Detection**: 100ms interval processing with robust error handling
@@ -131,9 +131,20 @@ The system tracks user behavior through four main entities:
 
 ### Core Algorithms
 - **Pose Detection**: Uses facial landmarks (nose, eyes, mouth) for yaw angle calculation
-- **Blink Detection**: Eye Aspect Ratio (EAR) using 6-point eye landmarks
+- **Blink Detection (registration/liveness only)**: Eye Aspect Ratio (EAR) using 6-point eye landmarks via face-api.js — **not used in exam proctoring**
 - **Pose Classification**: 15° threshold for front/left/right classification
-- **Confidence Thresholds**: 70% minimum for pose validation, 0.25 EAR for blink detection
+- **Confidence Thresholds**: 70% minimum for pose validation; **0.25 EAR for blink/liveness during register/login only**
+
+### EAR Thresholds — Register vs Proctoring
+
+Two separate EAR thresholds; do not mix them:
+
+| Context | Condition | Source |
+|---------|-----------|--------|
+| **Register / Liveness** (face-api.js) | EAR < **0.25** → blink detected | `src/lib/face-api/` |
+| **Exam Proctoring** (CBMI Guide) | avgEAR < **0.10** AND headPitch > **10°** → `EYES_CLOSED_DISENGAGED` | `src/lib/cbmi-parameters.ts`, `mediapipe-detector.ts`, `behavior-rule-labeler.ts` |
+
+Proctoring pipeline: `MediaPipeDetector.calculateEAR()` → `BehaviorFeatureSync` → `labelBehaviorFromFeatures()` → stored in `behavior_feature_logs`.
 
 ### face-api.js Integration (`src/lib/face-api.ts`)
 - `loadFaceApiModels()` - CDN-based model loading with error handling
@@ -148,7 +159,19 @@ The system tracks user behavior through four main entities:
 1. **Front Pose**: Straight-facing capture (yaw < 15°)
 2. **Left Pose**: 30° left turn (yaw < -15°)
 3. **Right Pose**: 30° right turn (yaw > 15°)
-4. **Blink Detection**: EAR < 0.25 threshold
+4. **Blink Detection**: EAR < 0.25 threshold (registration/liveness only — see EAR Thresholds table above)
+
+## CBMI Proctoring Parameters (`src/lib/cbmi-parameters.ts`)
+
+Canonical exam-monitoring thresholds (applied in `mediapipe-detector.ts`):
+
+- **Yaw**: ±20° (`YAW_THRESHOLD`)
+- **Pitch**: up 14° / down 12° (`PITCH_UP_THRESHOLD`, `PITCH_DOWN_THRESHOLD`)
+- **Hysteresis**: 5° (`HYSTERESIS_MARGIN`)
+- **Distance**: > 70 cm → too far (`DISTANCE_THRESHOLD_CM`)
+- **Brightness**: min 0.20, dim-light 0.35 (`BRIGHTNESS_MIN_THRESHOLD`, `BRIGHTNESS_DIM_LIGHT_THRESHOLD`)
+- **Sustained look-away**: 2 seconds (`SUSTAINED_DURATION_SEC`) — `behavior_feature_logs` uses SUSTAINED vs BRIEF; **`tracking_logs` saves FACE_ORIENTATION only when duration ≥ 2s** (`filterOrientationEventsForTrackingLog` in `orientation/route.ts`)
+- **Eye disengagement**: avgEAR < 0.10 AND headPitch > 10° → scenario `EYES_CLOSED_DISENGAGED`
 
 ## Admin Dashboard System
 
@@ -323,7 +346,8 @@ Use `@/*` alias for imports from `src/` directory (configured in tsconfig.json).
 
 #### 🎯 **Face Orientation Detection System (Phase 1 Complete)**
 **Core Features:**
-- **Looking Away Detection**: Threshold-based algorithm (Yaw: ±20°, Pitch: ±15°)
+- **Looking Away Detection**: CBMI thresholds (Yaw: ±20°, Pitch: up 14° / down 12°, sustained 2s)
+- **Eye Disengagement Detection**: avgEAR < 0.10 AND headPitch > 10° → `EYES_CLOSED_DISENGAGED` (logged via `behavior-rule-labeler.ts`)
 - **Real-time Counting**: Live statistics for total detections and away-from-screen events
 - **Visual Feedback**: Color-coded Sci-Fi mesh (green=focused, red=looking away)
 - **Performance Metrics**: Attention rate percentage calculation and duration tracking
