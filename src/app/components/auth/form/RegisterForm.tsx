@@ -145,7 +145,6 @@ export function RegisterForm({
         error={errors.confirmPassword}
         autoComplete="new-password"
       />
-      />
     </>
   )
 }
