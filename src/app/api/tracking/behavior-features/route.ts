@@ -174,6 +174,24 @@ export async function POST(request: NextRequest) {
 
   } catch (error: unknown) {
     console.error('Error saving behavior feature logs:', error)
+
+    const prismaCode =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: string }).code)
+        : null
+
+    if (prismaCode === 'P2022') {
+      return NextResponse.json(
+        {
+          error: 'Database schema out of date (missing column on behavior_feature_logs)',
+          details:
+            'Run: npx prisma db execute --file prisma/scripts/catch-up-behavior-feature-logs.sql',
+          code: 'P2022',
+        },
+        { status: 503 }
+      )
+    }
+
     return NextResponse.json(
       { 
         error: 'Failed to save behavior feature logs',

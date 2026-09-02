@@ -9,7 +9,6 @@ import { useCamera } from '@/hooks/useCamera'
 import { BehaviorFeatureSync } from "./BehaviorFeatureSync"
 import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
 import { buildTrackingRuntimeConfig } from '@/lib/tracking-profile'
-import { usePageVisibility } from '@/hooks/usePageVisibility'
 import {
   formatBenchmarkConfidence,
   formatBenchmarkFps,
@@ -18,7 +17,7 @@ import {
   formatComparableInferenceMs,
   formatComparableScore,
 } from '@/lib/engine-benchmark'
-import { drawSciFiFaceMesh } from '@/lib/face-mesh-utils'
+import { drawAllEngineOverlays } from '@/lib/engine-overlay-utils'
 import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
 import toast from 'react-hot-toast'
 
@@ -90,26 +89,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     getBenchmarkMetrics,
     captureSyncedBenchmark,
     getComparableBenchmarkMetrics,
-    setTrackingPaused,
+    getLatestDetection,
+    resetDetectionFrameCount,
   } = useHybridFaceDetection({
     runtimeConfig: trackingConfigRef.current,
     lookingAwayThresholdMs: 3000,
   })
-
-  usePageVisibility(
-    () => {
-      if (trackingConfigRef.current.pauseWhenHidden) {
-        setTrackingPaused(true)
-        toast('แท็บถูกซ่อน — หยุดตรวจจับชั่วคราว', { icon: '⚠️', duration: 4000 })
-      }
-    },
-    () => {
-      if (trackingConfigRef.current.pauseWhenHidden) {
-        setTrackingPaused(false)
-        toast.success('กลับมาที่แท็บแล้ว — ดำเนินการตรวจจับต่อ')
-      }
-    }
-  )
 
   // Ref สำหรับเก็บ violations ล่าสุดเพื่อไม่ให้ callback re-trigger
   const violationsRef = useRef(violations)
@@ -117,146 +102,35 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     violationsRef.current = violations
   }, [violations])
 
-  // 🎨 วาดการแสดงผล Sci-Fi Mesh & 4 AI Models Overlays พร้อมกันบน Canvas
+  // 🎨 Canvas overlay — mark จุดตรวจจับของแต่ละโมเดล (rAF + refs)
   useEffect(() => {
-    const canvas = canvasRef.current
-    const video = videoRef.current
-    if (!canvas || !video) return
+    if (!isActive) return
 
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    const vw = canvas.width
-    const vh = canvas.height
-
-    // คำนวณ scaling coordinates รองรับทั้ง mobile portrait และ desktop landscape
-    const { scaleX, scaleY, offsetX, offsetY } = (video.videoWidth && video.videoHeight)
-      ? {
-          scaleX: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01
-            ? (video.videoWidth / video.videoHeight > vw / vh ? vw : vh * (video.videoWidth / video.videoHeight))
-            : vw,
-          scaleY: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01
-            ? (video.videoWidth / video.videoHeight > vw / vh ? vw / (video.videoWidth / video.videoHeight) : vh)
-            : vh,
-          offsetX: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01 && (video.videoWidth / video.videoHeight <= vw / vh)
-            ? (vw - vh * (video.videoWidth / video.videoHeight)) / 2
-            : 0,
-          offsetY: Math.abs((video.videoWidth / video.videoHeight) - (vw / vh)) > 0.01 && (video.videoWidth / video.videoHeight > vw / vh)
-            ? (vh - vw / (video.videoWidth / video.videoHeight)) / 2
-            : 0
-        }
-      : { scaleX: vw, scaleY: vh, offsetX: 0, offsetY: 0 }
-
-    const videoWidth = video.videoWidth || 640
-    const videoHeight = video.videoHeight || 480
-
-    // 1. Draw MediaPipe Sci-Fi Mesh (tier-gated density)
-    if (mediaPipeData && mediaPipeData.isDetected && mediaPipeData.landmarks) {
-      drawSciFiFaceMesh(
-        ctx,
-        mediaPipeData.landmarks,
-        video,
-        vw,
-        vh,
-        mediaPipeData.orientation.isLookingAway,
-        trackingConfigRef.current.overlayMode
-      )
-    }
-
-    const showEngineOverlays = trackingConfigRef.current.showEngineOverlays
-
-    // 2. Draw YOLOv8-Face Bounding Box & 5 Keypoints (🔵 Blue Box + 🔴 Red Keypoints)
-    if (showEngineOverlays && yoloMultiFaceData) {
-      if (yoloMultiFaceData.primaryBox) {
-        const b = yoloMultiFaceData.primaryBox
-        const bx = (b.x / videoWidth) * scaleX + offsetX
-        const by = (b.y / videoHeight) * scaleY + offsetY
-        const bw = (b.width / videoWidth) * scaleX
-        const bh = (b.height / videoHeight) * scaleY
-
-        ctx.strokeStyle = '#3B82F6'
-        ctx.lineWidth = 2.5
-        ctx.setLineDash([6, 4])
-        ctx.strokeRect(bx, by, bw, bh)
-        ctx.setLineDash([])
-
-        // YOLO Label
-        ctx.fillStyle = '#3B82F6'
-        ctx.fillRect(bx, Math.max(0, by - 22), 140, 22)
-        ctx.fillStyle = '#FFFFFF'
-        ctx.font = 'bold 11px Inter, sans-serif'
-        ctx.fillText(`YOLOv8-Face (${(b.confidence * 100).toFixed(0)}%)`, bx + 5, Math.max(14, by - 6))
-
-        // 5 Keypoints
-        if (yoloMultiFaceData.keypoints) {
-          ctx.fillStyle = '#EF4444'
-          yoloMultiFaceData.keypoints.forEach(kp => {
-            const kpx = (kp.x / videoWidth) * scaleX + offsetX
-            const kpy = (kp.y / videoHeight) * scaleY + offsetY
-            ctx.beginPath()
-            ctx.arc(kpx, kpy, 4, 0, 2 * Math.PI)
-            ctx.fill()
+    let rafId = 0
+    const drawOverlay = () => {
+      const canvas = canvasRef.current
+      const video = videoRef.current
+      if (canvas && video) {
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          const snap = getLatestDetection()
+          drawAllEngineOverlays(ctx, {
+            mediaPipeData: snap.mediaPipeData,
+            yoloData: snap.yoloMultiFaceData,
+            dlibData: snap.dlibData,
+            openFaceData: snap.openFaceData,
+            l2csData: snap.l2csGazeData,
+            video,
+            overlayMode: trackingConfigRef.current.overlayMode,
           })
         }
       }
-
-      // Draw Multi-Face Intruder Bounding Boxes
-      if (yoloMultiFaceData.boxes) {
-        yoloMultiFaceData.boxes.forEach((box) => {
-          if (!box.isPrimary) {
-            const vx = (box.x / videoWidth) * scaleX + offsetX
-            const vy = (box.y / videoHeight) * scaleY + offsetY
-            const vbw = (box.width / videoWidth) * scaleX
-            const vbh = (box.height / videoHeight) * scaleY
-
-            ctx.strokeStyle = '#EF4444'
-            ctx.lineWidth = 3
-            ctx.strokeRect(vx, vy, vbw, vbh)
-
-            ctx.fillStyle = '#EF4444'
-            ctx.font = 'bold 11px sans-serif'
-            ctx.fillText(`🚨 INTRUDER (${(box.confidence * 100).toFixed(0)}%)`, vx, vy > 15 ? vy - 5 : vy + 15)
-          }
-        })
-      }
+      rafId = requestAnimationFrame(drawOverlay)
     }
 
-    // 3. Draw Dlib 68-Point Landmarks (🟠 Amber / Orange Dots)
-    if (showEngineOverlays && dlibData && dlibData.isDetected && dlibData.landmarks68) {
-      ctx.fillStyle = '#F59E0B'
-      dlibData.landmarks68.forEach(pt => {
-        const px = (pt.x / videoWidth) * scaleX + offsetX
-        const py = (pt.y / videoHeight) * scaleY + offsetY
-        ctx.beginPath()
-        ctx.arc(px, py, 2.5, 0, 2 * Math.PI)
-        ctx.fill()
-      })
-    }
-
-    // 4. Draw OpenFace 3D Gaze Vector (🟣 Purple Line & Circle)
-    if (showEngineOverlays && openFaceData && openFaceData.isDetected) {
-      const fc = openFaceData.faceCenter ? {
-        x: (openFaceData.faceCenter.x / videoWidth) * scaleX + offsetX,
-        y: (openFaceData.faceCenter.y / videoHeight) * scaleY + offsetY
-      } : { x: vw / 2, y: vh / 2 }
-      const gaze = openFaceData.gazeVector
-
-      // Gaze Vector Line
-      ctx.strokeStyle = '#A855F7'
-      ctx.lineWidth = 4
-      ctx.beginPath()
-      ctx.moveTo(fc.x, fc.y - 15)
-      ctx.lineTo(fc.x + gaze.x * 180, fc.y - 15 + gaze.y * 180)
-      ctx.stroke()
-
-      // Target Gaze Point
-      ctx.fillStyle = '#A855F7'
-      ctx.beginPath()
-      ctx.arc(fc.x + gaze.x * 180, fc.y - 15 + gaze.y * 180, 6, 0, 2 * Math.PI)
-      ctx.fill()
-    }
-  }, [mediaPipeData, yoloMultiFaceData, dlibData, openFaceData])
+    rafId = requestAnimationFrame(drawOverlay)
+    return () => cancelAnimationFrame(rafId)
+  }, [isActive, getLatestDetection])
 
   // 🚀 ส่งภาพ Snapshot เพื่อวิเคราะห์ Phase 3 Deep Analytics (L2CS-Net + MiniFASNet) ไปยัง API
   const sendSnapshotForDeepAnalytics = useCallback(async () => {
@@ -305,10 +179,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     }
   }, [mediaPipeData])
 
-  // Periodic Snapshot Trigger (ทุกๆ 20 วินาทีระหว่างการติดตาม)
+  // Periodic Snapshot Trigger — research profile only (exam saves CPU/network)
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null
-    if (isActive) {
+    if (isActive && trackingConfigRef.current.enableDeepAnalyticsSnapshots) {
       const timeout = setTimeout(() => {
         sendSnapshotForDeepAnalytics()
       }, 5000)
@@ -734,7 +608,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
           if (stats) {
             benchmarkSyncCounterRef.current += 1
-            const includeBenchmark = benchmarkSyncCounterRef.current % benchmarkSyncEveryN === 0
+            const includeBenchmark =
+              trackingConfigRef.current.profile === 'research' &&
+              benchmarkSyncCounterRef.current % benchmarkSyncEveryN === 0
             saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true, includeBenchmark)
               .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
               .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
@@ -791,6 +667,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         participantCode={participantCode}
         experimentPhase={experimentPhase}
         trackingConfig={trackingConfigRef.current}
+        getLatestDetection={getLatestDetection}
+        resetDetectionFrameCount={resetDetectionFrameCount}
         mediaPipeData={mediaPipeData}
         yoloData={yoloMultiFaceData}
         dlibData={dlibData}
@@ -833,6 +711,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
               <span className="flex items-center gap-1 text-blue-400 font-medium"><span className="w-2 h-2 rounded-full bg-blue-500"></span>YOLOv8</span>
               <span className="flex items-center gap-1 text-amber-400 font-medium"><span className="w-2 h-2 rounded-full bg-amber-500"></span>Dlib</span>
               <span className="flex items-center gap-1 text-purple-400 font-medium"><span className="w-2 h-2 rounded-full bg-purple-500"></span>OpenFace</span>
+              <span className="flex items-center gap-1 text-cyan-400 font-medium"><span className="w-2 h-2 rounded-full bg-cyan-400"></span>L2CS</span>
             </div>
           )}
         </div>
@@ -911,7 +790,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                       Dlib (68-Point Landmark)
                     </td>
                     <td className="px-3 py-2">
-                      <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                      {benchmarkMetrics.dlib.isDetected ? (
+                        <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                      ) : (
+                        <span className="bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded">STANDBY</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 font-bold text-amber-600">{formatBenchmarkFps(benchmarkMetrics.dlib.fps)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.dlib.inferenceLatencyMs)}</td>
@@ -926,7 +809,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                       OpenFace (Action Units & Gaze)
                     </td>
                     <td className="px-3 py-2">
-                      <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                      {benchmarkMetrics.openface.isDetected ? (
+                        <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                      ) : (
+                        <span className="bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded">OFFLINE</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 font-bold text-purple-600">{formatBenchmarkFps(benchmarkMetrics.openface.fps)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.openface.inferenceLatencyMs)}</td>

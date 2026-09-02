@@ -101,19 +101,31 @@ export interface BehaviorFeatureSyncProps {
   openFaceData: any
   l2csGazeData: any
   trackingConfig?: TrackingRuntimeConfig
+  /** Read latest detection from refs — avoids re-running effect every MP frame */
+  getLatestDetection?: () => {
+    mediaPipeData: any
+    yoloMultiFaceData: any
+    dlibData: any
+    openFaceData: any
+    l2csGazeData: any
+    detectionFrameCount: number
+  }
+  resetDetectionFrameCount?: () => void
 }
 
 export function BehaviorFeatureSync({
   isActive,
   sessionId,
-  mediaPipeData,
-  yoloData,
-  dlibData,
-  openFaceData,
-  l2csGazeData,
+  mediaPipeData: mediaPipeDataProp,
+  yoloData: yoloDataProp,
+  dlibData: dlibDataProp,
+  openFaceData: openFaceDataProp,
+  l2csGazeData: l2csGazeDataProp,
   participantCode,
   experimentPhase = DEFAULT_EXPERIMENT_PHASE,
   trackingConfig: trackingConfigProp,
+  getLatestDetection,
+  resetDetectionFrameCount,
 }: BehaviorFeatureSyncProps) {
   const trackingConfigRef = useRef<TrackingRuntimeConfig>(
     trackingConfigProp ?? buildTrackingRuntimeConfig()
@@ -126,16 +138,15 @@ export function BehaviorFeatureSync({
   const logBufferRef = useRef<any[]>([])
   const sampleIndexRef = useRef<number>(0)
   const sessionStartTimeRef = useRef<number>(Date.now())
-  const lastSampleTimeRef = useRef<number>(Date.now())
   const lastLogFingerprintRef = useRef<string | null>(null)
   const headRollHistoryRef = useRef<number[]>([])
 
   const lastQualityCheckRef = useRef<number>(0);
   const qualityReadyRef = useRef<boolean>(false);
   const latestQualityRef = useRef({ brightnessMean: 0.5, contrastScore: 0.5, sharpnessScore: 0 });
-  const detectionFrameCountRef = useRef<number>(0);
   const fpsWindowStartRef = useRef<number>(Date.now());
   const currentFpsRef = useRef<number>(0);
+  const detectionFrameCountAtWindowStartRef = useRef<number>(0);
   
   // Throttle timer variables
 
@@ -158,26 +169,42 @@ export function BehaviorFeatureSync({
     lastQualityCheckRef.current = 0
   }, [sessionId])
 
-  // Count detection-loop frames (~10 Hz) separately from 2 Hz sampling
-  useEffect(() => {
-    if (!isActive || !mediaPipeData) return
-
-    detectionFrameCountRef.current++
-    const now = Date.now()
-    if (now - fpsWindowStartRef.current >= 1000) {
-      currentFpsRef.current = detectionFrameCountRef.current
-      detectionFrameCountRef.current = 0
-      fpsWindowStartRef.current = now
-    }
-  }, [isActive, mediaPipeData])
-
-  // Sample data at 2Hz (every 500ms) — doubled vs 1Hz while staying within 80-user DB budget
+  // Sample at configured Hz via interval — reads latest refs (not React state per frame)
   useEffect(() => {
     if (!isActive || !sessionId) return
 
-    const now = Date.now()
-    if (now - lastSampleTimeRef.current < sampleIntervalMs) return
-    lastSampleTimeRef.current = now
+    const sampleTick = () => {
+      const snap = getLatestDetection?.() ?? {
+        mediaPipeData: mediaPipeDataProp,
+        yoloMultiFaceData: yoloDataProp,
+        dlibData: dlibDataProp,
+        openFaceData: openFaceDataProp,
+        l2csGazeData: l2csGazeDataProp,
+        detectionFrameCount: 0,
+      }
+
+      const now = Date.now()
+      const frameDelta =
+        snap.detectionFrameCount - detectionFrameCountAtWindowStartRef.current
+      if (now - fpsWindowStartRef.current >= 1000) {
+        currentFpsRef.current = frameDelta
+        fpsWindowStartRef.current = now
+        resetDetectionFrameCount?.()
+        detectionFrameCountAtWindowStartRef.current = 0
+      }
+
+      const resolvedMediaPipe = snap.mediaPipeData ?? mediaPipeDataProp
+      const resolvedYolo = snap.yoloMultiFaceData ?? yoloDataProp
+      const resolvedDlib = snap.dlibData ?? dlibDataProp
+      const resolvedOpenFace = snap.openFaceData ?? openFaceDataProp
+      const resolvedL2cs = snap.l2csGazeData ?? l2csGazeDataProp
+
+      // Shadow props with latest snapshot inside tick
+      const mediaPipeData = resolvedMediaPipe
+      const yoloData = resolvedYolo
+      const dlibData = resolvedDlib
+      const openFaceData = resolvedOpenFace
+      const l2csGazeData = resolvedL2cs
 
     const videoEl = document.querySelector('video') as HTMLVideoElement | null
     const vw = videoEl?.videoWidth || 640
@@ -567,7 +594,26 @@ export function BehaviorFeatureSync({
         logBufferRef.current = [...logsToSend, ...logBufferRef.current].slice(0, RETRY_BUFFER_MAX)
       })
     }
-  }, [isActive, sessionId, mediaPipeData, yoloData, dlibData, openFaceData, l2csGazeData, participantCode, experimentPhase, sampleIntervalMs, sampleRateHz])
+    }
+
+    sampleTick()
+    const intervalId = setInterval(sampleTick, sampleIntervalMs)
+    return () => clearInterval(intervalId)
+  }, [
+    isActive,
+    sessionId,
+    getLatestDetection,
+    resetDetectionFrameCount,
+    participantCode,
+    experimentPhase,
+    sampleIntervalMs,
+    sampleRateHz,
+    mediaPipeDataProp,
+    yoloDataProp,
+    dlibDataProp,
+    openFaceDataProp,
+    l2csGazeDataProp,
+  ])
 
   // Sync on unmount or stop
   useEffect(() => {
