@@ -1,5 +1,11 @@
 // การนำเข้าและส่งออกฟังก์ชันทั้งหมดจากโมดูลต่างๆ
 
+import {
+  YAW_THRESHOLD,
+  EAR_THRESHOLD,
+  HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
+} from '@/lib/cbmi-parameters';
+
 // โมดูลการตรวจจับใบหน้า
 export {
   loadFaceApiModels,
@@ -56,12 +62,12 @@ export const FACE_API_CONFIG = {
   FACE_MATCH_THRESHOLD: 0.6,
   STRICT_MATCH_THRESHOLD: 0.4,
   
-  // เกณฑ์สำหรับการตรวจจับท่า (CBMI Guide: YAW_THRESHOLD = 20)
-  POSE_YAW_THRESHOLD: 20,
-  // CBMI Parameter Adjustment Guide: EAR ต้องต่ำกว่า 0.10 ร่วมกับ headPitch > 10 องศา จึงจะถือว่า disengaged
-  BLINK_EAR_THRESHOLD: 0.10,
-  EAR_DISENGAGEMENT_THRESHOLD: 0.10,
-  HEAD_PITCH_DISENGAGEMENT_THRESHOLD: 10,
+  // CBMI proctoring thresholds — sourced from cbmi-parameters.ts
+  POSE_YAW_THRESHOLD: YAW_THRESHOLD,
+  EAR_DISENGAGEMENT_THRESHOLD: EAR_THRESHOLD,
+  HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
+  /** Registration/liveness blink (detectBlinking uses ~0.30 locally) */
+  BLINK_EAR_THRESHOLD: 0.25,
   
   // การตั้งค่าโมเดล
   MODEL_INPUT_SIZE: 416,

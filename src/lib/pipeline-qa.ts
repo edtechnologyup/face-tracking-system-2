@@ -14,7 +14,7 @@ import {
   SHARPNESS_MIN_THRESHOLD,
   OCCLUSION_VALID_THRESHOLD,
   YAW_THRESHOLD,
-} from '@/lib/mediapipe-detector';
+} from '@/lib/cbmi-parameters';
 
 /** featureSchemaVersion ปัจจุบัน */
 export const CURRENT_FEATURE_SCHEMA_VERSION = '2.8';
