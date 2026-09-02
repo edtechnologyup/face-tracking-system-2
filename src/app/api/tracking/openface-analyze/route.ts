@@ -3,6 +3,33 @@ import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limiter';
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
+/** localhost ใช้ได้แค่ dev — บน Vercel ชี้ไปที่ container ตัวเอง ไม่มี OpenFace */
+function resolveOpenFaceServiceUrl(): string | null {
+  const raw = process.env.OPENFACE_SERVICE_URL?.trim();
+  if (!raw) return null;
+
+  try {
+    const hostname = new URL(raw).hostname.toLowerCase();
+    const isLoopback =
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '0.0.0.0' ||
+      hostname === '::1';
+
+    if (isLoopback && process.env.VERCEL) {
+      console.warn(
+        'OPENFACE_SERVICE_URL points to localhost — ignored on Vercel. Deploy openface-server separately and set a public URL.'
+      );
+      return null;
+    }
+  } catch {
+    console.warn('OPENFACE_SERVICE_URL is not a valid URL');
+    return null;
+  }
+
+  return raw;
+}
+
 export async function POST(request: NextRequest) {
   const clientKey =
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
@@ -17,7 +44,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
   }
 
-  const serviceUrl = process.env.OPENFACE_SERVICE_URL;
+  const serviceUrl = resolveOpenFaceServiceUrl();
   if (!serviceUrl) {
     return NextResponse.json(
       { error: 'OPENFACE_SERVICE_URL is not configured' },

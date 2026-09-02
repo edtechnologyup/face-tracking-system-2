@@ -29,18 +29,18 @@ export function LoginForm({
         error={errors.email}
       />
 
-      <div className="space-y-2">
-        <PasswordInput
-          label="รหัสผ่าน"
-          value={password}
-          onChange={onChange("password")}
-          placeholder="••••••••"
-          required
-          showStrength={false}
-          showToggle={true}
-          error={errors.password}
-        />
-        <div className="flex justify-end">
+      <PasswordInput
+        label="รหัสผ่าน"
+        value={password}
+        onChange={onChange("password")}
+        placeholder="••••••••"
+        required
+        showStrength={false}
+        showToggle={true}
+        error={errors.password}
+        autoComplete="current-password"
+      />
+      <div className="flex justify-end">
           <Link 
             href="/forgot-password" 
             className="text-sm font-medium text-purple-600 hover:text-purple-800 transition-colors"
@@ -48,7 +48,6 @@ export function LoginForm({
             ลืมรหัสผ่านใช่หรือไม่?
           </Link>
         </div>
-      </div>
     </>
   )
 }

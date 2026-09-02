@@ -7,19 +7,52 @@ import { DetectionStats } from './DetectionStats'
 import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
 import { BehaviorFeatureSync } from "./BehaviorFeatureSync"
+import { ModelEventLogSync } from './ModelEventLogSync'
+import type { ModelEventLogEnqueue } from '@/lib/model-event-log'
 import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
 import { buildTrackingRuntimeConfig } from '@/lib/tracking-profile'
 import {
   formatBenchmarkConfidence,
   formatBenchmarkFps,
-  formatBenchmarkMemory,
   formatLandmarksColumn,
   formatComparableInferenceMs,
   formatComparableScore,
+  type EngineBenchmarkMetric,
 } from '@/lib/engine-benchmark'
 import { drawAllEngineOverlays } from '@/lib/engine-overlay-utils'
-import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
 import toast from 'react-hot-toast'
+
+function BenchmarkEngineMobileCard({
+  name,
+  metric,
+  statusLabel,
+  statusClassName,
+  accentClassName,
+}: {
+  name: string
+  metric: EngineBenchmarkMetric
+  statusLabel: string
+  statusClassName: string
+  accentClassName: string
+}) {
+  return (
+    <div className={`p-3 rounded-lg border ${accentClassName}`}>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className="font-bold text-xs leading-snug">{name}</span>
+        <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded ${statusClassName}`}>
+          {statusLabel}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-gray-700">
+        <span>FPS: <strong>{formatBenchmarkFps(metric.fps)}</strong></span>
+        <span>Infer: {formatComparableInferenceMs(metric.inferenceLatencyMs)}</span>
+        <span>Score: {formatComparableScore(metric.comparableDetectionScore)}</span>
+        <span className="truncate">{formatLandmarksColumn(metric)}</span>
+        <span className="col-span-2 truncate">{formatBenchmarkConfidence(metric)}</span>
+      </div>
+    </div>
+  )
+}
 
 interface FaceTrackerProps {
   onTrackingStop: () => void
@@ -62,6 +95,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [analyticsResult, setAnalyticsResult] = useState<AnalyticsResult | null>(null)
+  const modelEventLogEnqueueRef = useRef<ModelEventLogEnqueue | null>(null)
 
   // ใช้ Hybrid custom hooks
   const { initializeCamera, stopCamera } = useCamera()
@@ -77,7 +111,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     isRecording, 
     orientationStats, 
     faceLossStats,
-    initializeHybridDetectors, 
+    initializeHybridDetectors,
+    preloadBackgroundEngines,
     startHybridTracking, 
     stopHybridTracking,
     startRecording,
@@ -94,7 +129,13 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   } = useHybridFaceDetection({
     runtimeConfig: trackingConfigRef.current,
     lookingAwayThresholdMs: 3000,
+    modelEventLogEnqueueRef,
   })
+
+  // Preload YOLO/Dlib weights before Start (parallel with page load — no extra inference)
+  useEffect(() => {
+    void preloadBackgroundEngines()
+  }, [preloadBackgroundEngines])
 
   // Ref สำหรับเก็บ violations ล่าสุดเพื่อไม่ให้ callback re-trigger
   const violationsRef = useRef(violations)
@@ -259,6 +300,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     try {
       const token = localStorage.getItem('token')
       if (!token) {
+        if (isKeepAlive) {
+          console.warn('[session] skip end — no auth token')
+          return null
+        }
         throw new Error('ไม่พบ token การเข้าสู่ระบบ')
       }
 
@@ -275,16 +320,33 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         keepalive: isKeepAlive
       })
 
-      const result = await response.json()
+      const result = await response.json().catch(() => ({} as { error?: string }))
       
       if (!response.ok) {
-        throw new Error(result.error || 'ไม่สามารถอัปเดต session ได้')
+        const message = result.error || 'ไม่สามารถอัปเดต session ได้'
+        // Session may already be closed (double-stop, stale cleanup)
+        if (response.status === 404) {
+          console.warn('[session] already ended or not found:', sessionId)
+          return null
+        }
+        if (isKeepAlive) {
+          console.warn('[session] end failed', response.status, message)
+          return null
+        }
+        throw new Error(message)
       }
 
       console.log(`✅ อัปเดต tracking session สำเร็จ (${status}):`, result.data)
       return result.data
     } catch (error) {
-      console.error('❌ เกิดข้อผิดพลาดในการอัปเดต session:', error)
+      if (isKeepAlive) {
+        console.warn(
+          '⚠️ [session] end tracking failed:',
+          error instanceof Error ? error.message : error
+        )
+        return null
+      }
+      console.warn('❌ เกิดข้อผิดพลาดในการอัปเดต session:', error)
       setApiError(error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ')
       return null
     }
@@ -322,7 +384,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       }
 
       startHybridTracking(videoRef)
-      
+
+      benchmarkSyncCounterRef.current = Math.max(0, benchmarkSyncEveryN - 1)
+
       setTimeout(() => {
         startRecording()
       }, 1000)
@@ -342,16 +406,27 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     faceDetectionLossStats?: { lossCount: number; totalLossTime: number }, 
     faceDetectionLossEvents?: unknown[],
     isKeepAlive = false,
-    includeBenchmarkMetrics = true
+    includeBenchmarkMetrics = true,
+    /** When true, run same-frame 4-engine capture (needed for model_*_logs). */
+    runSyncedCapture = !isKeepAlive
   ) => {
     try {
       if (!isKeepAlive) setIsLoading(true)
       const token = localStorage.getItem('token')
       if (!token) {
+        if (isKeepAlive) {
+          console.warn('[orientation] skip save — no auth token')
+          return null
+        }
         throw new Error('ไม่พบ token การเข้าสู่ระบบ')
       }
 
-      // แปลงข้อมูล events ให้ตรงกับ API format (กรอง CENTER ออก)
+      if (!stats) {
+        if (isKeepAlive) return null
+        throw new Error('ไม่มีข้อมูลสถิติ session')
+      }
+
+      // แปลงข้อมูล events ให้ตรงกับ API format (กรอง CENTER + ส่งเฉพาะ event ที่จบแล้ว)
       const orientationEvents = (events as Array<{
         startTime: string;
         endTime: string;
@@ -361,8 +436,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         maxPitch?: number;
         confidence?: number;
       }>)
-      .filter(event => event.direction !== 'CENTER') // กรอง CENTER ออก
-        .filter(event => typeof event.duration !== 'number' || event.duration >= SUSTAINED_DURATION_SEC)
+      .filter(event => event.direction !== 'CENTER')
+      .filter(event => Boolean(event.endTime))
       .map(event => ({
         startTime: event.startTime,
         endTime: event.endTime,
@@ -374,16 +449,35 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         isActive: false
       }))
 
-      const currentBenchmark = includeBenchmarkMetrics
-        ? (videoRef.current
-            ? await captureSyncedBenchmark(videoRef.current)
-            : null) ?? getBenchmarkMetrics()
-        : null
+      let currentBenchmark: ReturnType<typeof getBenchmarkMetrics> = null
+      if (includeBenchmarkMetrics) {
+        const captured =
+          runSyncedCapture && videoRef.current
+            ? await captureSyncedBenchmark(videoRef.current).catch((err) => {
+                console.warn('[benchmark] synced capture failed during save:', err)
+                return null
+              })
+            : null
+        currentBenchmark =
+          captured ?? getComparableBenchmarkMetrics() ?? getBenchmarkMetrics()
 
-      if (includeBenchmarkMetrics && currentBenchmark && !currentBenchmark.snapshotSynced) {
-        console.warn(
-          '[benchmark] Skipping non-synced snapshot — deploy OpenFace server for 4-model comparison'
-        )
+        if (!currentBenchmark) {
+          console.warn('[benchmark] no metrics available for model_*_logs persist')
+        } else if (runSyncedCapture && !currentBenchmark.snapshotSynced) {
+          console.warn(
+            '[benchmark] partial snapshot — model_*_logs saved with snapshotSynced=false'
+          )
+        }
+      }
+
+      const payload = {
+        sessionId: sessionId,
+        events: orientationEvents,
+        sessionStats: stats as Record<string, unknown>,
+        faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
+        faceDetectionLossEvents: faceDetectionLossEvents || [],
+        securityViolations: violationsRef.current || [],
+        benchmarkMetrics: currentBenchmark || undefined,
       }
 
       const response = await fetch('/api/tracking/orientation', {
@@ -392,34 +486,52 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          sessionId: sessionId,
-          events: orientationEvents,
-          sessionStats: stats as Record<string, unknown>,
-          faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
-          faceDetectionLossEvents: faceDetectionLossEvents || [],
-          securityViolations: violationsRef.current || [],
-          benchmarkMetrics: currentBenchmark || undefined
-        }),
+        body: JSON.stringify(payload),
         keepalive: isKeepAlive
       })
 
       const result = await response.json()
       
       if (!response.ok) {
-        throw new Error(result.error || 'ไม่สามารถบันทึกข้อมูลได้')
+        const message = result.error || 'ไม่สามารถบันทึกข้อมูลได้'
+        if (isKeepAlive) {
+          console.warn('[orientation] auto-sync failed', response.status, message)
+          return null
+        }
+        throw new Error(message)
       }
 
       console.log('✅ บันทึกข้อมูล orientation สำเร็จ:', result.data)
+      if (result.data?.benchmarkPersist) {
+        const bp = result.data.benchmarkPersist as {
+          persisted?: boolean
+          enginesWritten?: number
+          skippedDuplicate?: boolean
+        }
+        if (bp.persisted) {
+          console.log(
+            `📊 model_*_logs: ${bp.enginesWritten ?? 0} engines saved`
+          )
+        } else if (bp.skippedDuplicate) {
+          console.log('📊 model_*_logs: skipped duplicate snapshot')
+        }
+      }
       return result.data
     } catch (error) {
+      if (isKeepAlive) {
+        console.warn(
+          '⚠️ [Auto-Sync] orientation save failed:',
+          error instanceof Error ? error.message : error
+        )
+        return null
+      }
       console.error('❌ เกิดข้อผิดพลาดในการบันทึกข้อมูล:', error)
       setApiError(error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ')
       return null
     } finally {
       if (!isKeepAlive) setIsLoading(false)
     }
-  }, [getBenchmarkMetrics, captureSyncedBenchmark])
+  }, [getBenchmarkMetrics, getComparableBenchmarkMetrics, captureSyncedBenchmark])
 
   // หยุดบันทึกและแสดงผลลัพธ์
   const handleStopRecording = useCallback(async () => {
@@ -529,7 +641,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         confidence?: number;
       }>) || [])
         .filter(event => event.direction !== 'CENTER')
-        .filter(event => typeof event.duration !== 'number' || event.duration >= SUSTAINED_DURATION_SEC)
+        .filter(event => Boolean(event.endTime))
         .map(event => ({
           startTime: event.startTime,
           endTime: event.endTime,
@@ -563,14 +675,14 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
           faceDetectionLossEvents: faceDetectionLossEvents || [],
           securityViolations: violationsRef.current || [],
-          benchmarkMetrics: getComparableBenchmarkMetrics() || undefined
+          benchmarkMetrics: getComparableBenchmarkMetrics() ?? getBenchmarkMetrics() ?? undefined
         }),
         keepalive: isKeepAlive
-      }).catch(err => console.error('Auto-sync orientation error:', err))
+      }).catch(err => console.warn('Auto-sync orientation error:', err))
 
-      // 2. อัปเดตสถานะ session
+      // 2. อัปเดตสถานะ session (PUT = จบ session ที่มีอยู่)
       fetch('/api/tracking/sessions', {
-        method: 'POST',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
@@ -580,13 +692,13 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           status: sessionStatus
         }),
         keepalive: isKeepAlive
-      }).catch(err => console.error('Auto-sync session status error:', err))
+      }).catch(err => console.warn('Auto-sync session status error:', err))
 
       if (sessionStatus !== 'IN_PROGRESS') {
         isSessionSavedRef.current = true
       }
     } catch (err) {
-      console.error('Flush session data error:', err)
+      console.warn('Flush session data error:', err)
     }
   }, [stopRecording, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents, getComparableBenchmarkMetrics])
 
@@ -608,12 +720,24 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
           if (stats) {
             benchmarkSyncCounterRef.current += 1
-            const includeBenchmark =
-              trackingConfigRef.current.profile === 'research' &&
+            const runSyncedCapture =
               benchmarkSyncCounterRef.current % benchmarkSyncEveryN === 0
-            saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true, includeBenchmark)
-              .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
-              .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
+            saveOrientationData(
+              sessionId,
+              events,
+              stats,
+              faceLossStats,
+              faceLossEvents,
+              true,
+              true,
+              runSyncedCapture
+            )
+              .then((data) => {
+                if (data) {
+                  console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ')
+                }
+              })
+              .catch(() => undefined)
           }
         }
       }, ORIENTATION_SYNC_MS)
@@ -660,7 +784,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   }, [isActive, isLoading, startTracking]) // เพิ่ม dependencies ที่จำเป็น
 
   return (
-    <Card className="w-full h-full">
+    <Card className="w-full h-full overflow-hidden">
       <BehaviorFeatureSync 
         isActive={isActive}
         sessionId={currentSessionId}
@@ -675,28 +799,34 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         openFaceData={openFaceData}
         l2csGazeData={l2csGazeData}
       />
-      <div className="p-6">
+      <ModelEventLogSync
+        isActive={isActive}
+        sessionId={currentSessionId}
+        getLatestDetection={getLatestDetection}
+        enqueueRef={modelEventLogEnqueueRef}
+      />
+      <div className="p-3 sm:p-4 md:p-6">
         {/* Video and Canvas Container with Live Face Count HUD Badge */}
-        <div className="relative mb-6 rounded-2xl overflow-hidden shadow-lg border border-gray-200">
+        <div className="relative mb-4 sm:mb-6 rounded-xl sm:rounded-2xl overflow-hidden shadow-lg border border-gray-200 bg-black w-full aspect-[3/4] sm:aspect-video max-h-[55vh] sm:max-h-[60vh]">
           <VideoPlayer ref={videoRef} />
           <OverlayCanvas ref={canvasRef} videoRef={videoRef} />
 
           {/* Live Detected Face Count Badge on Video Corner */}
           {isActive && (
-            <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+            <div className="absolute top-2 left-2 right-2 sm:top-4 sm:left-4 sm:right-auto z-20 flex flex-wrap items-start gap-1.5 sm:gap-2 max-w-full">
               {mediaPipeData?.multipleFaces?.isSecurityRisk || (yoloMultiFaceData && yoloMultiFaceData.faceCount > 1) ? (
-                <div className="bg-red-600/90 text-white border border-red-400 backdrop-blur-md flex items-center gap-2 px-3.5 py-1.5 rounded-full shadow-lg text-xs font-bold font-mono animate-bounce">
-                  <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
-                  <span>🚨 ตรวจพบ: {yoloMultiFaceData?.faceCount || mediaPipeData?.multipleFaces?.count || 2} ใบหน้า (เสี่ยงทุจริต!)</span>
+                <div className="bg-red-600/90 text-white border border-red-400 backdrop-blur-md flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-full shadow-lg text-[10px] sm:text-xs font-bold font-mono max-w-full animate-pulse sm:animate-none">
+                  <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-white animate-ping shrink-0"></span>
+                  <span className="break-words">🚨 ตรวจพบ: {yoloMultiFaceData?.faceCount || mediaPipeData?.multipleFaces?.count || 2} ใบหน้า (เสี่ยงทุจริต!)</span>
                 </div>
               ) : mediaPipeData?.isDetected ? (
-                <div className="bg-slate-900/80 text-emerald-400 border border-emerald-500/40 backdrop-blur-md flex items-center gap-2 px-3.5 py-1.5 rounded-full shadow-lg text-xs font-bold font-mono">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div className="bg-slate-900/80 text-emerald-400 border border-emerald-500/40 backdrop-blur-md flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-full shadow-lg text-[10px] sm:text-xs font-bold font-mono max-w-full">
+                  <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
                   <span>👤 ตรวจพบ: 1 ใบหน้า (ผู้สอบหลัก)</span>
                 </div>
               ) : (
-                <div className="bg-slate-900/80 text-rose-400 border border-rose-500/40 backdrop-blur-md flex items-center gap-2 px-3.5 py-1.5 rounded-full shadow-lg text-xs font-bold font-mono">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+                <div className="bg-slate-900/80 text-rose-400 border border-rose-500/40 backdrop-blur-md flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-full shadow-lg text-[10px] sm:text-xs font-bold font-mono max-w-full">
+                  <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-rose-500 animate-ping shrink-0"></span>
                   <span>❌ ไม่พบใบหน้าในกล้อง</span>
                 </div>
               )}
@@ -705,7 +835,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
           {/* 4 Models Live Landmark Overlay Legend HUD Badge */}
           {isActive && (
-            <div className="absolute top-4 right-4 z-20 hidden sm:flex items-center gap-2 bg-slate-900/85 backdrop-blur-md text-white px-3 py-1.5 rounded-full border border-slate-700/60 shadow-lg text-[11px]">
+            <div className="absolute top-2 right-2 z-20 hidden sm:flex items-center gap-2 bg-slate-900/85 backdrop-blur-md text-white px-3 py-1.5 rounded-full border border-slate-700/60 shadow-lg text-[11px]">
               <span className="font-semibold text-gray-300">4-Models Overlay:</span>
               <span className="flex items-center gap-1 text-emerald-400 font-medium"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>MediaPipe</span>
               <span className="flex items-center gap-1 text-blue-400 font-medium"><span className="w-2 h-2 rounded-full bg-blue-500"></span>YOLOv8</span>
@@ -715,6 +845,18 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
             </div>
           )}
         </div>
+
+        {/* Mobile overlay legend */}
+        {isActive && (
+          <div className="flex sm:hidden flex-wrap gap-1.5 mb-4 text-[10px] text-gray-600">
+            <span className="font-semibold text-gray-500 w-full mb-0.5">Overlay:</span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">MediaPipe</span>
+            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">YOLOv8</span>
+            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Dlib</span>
+            <span className="px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">OpenFace</span>
+            <span className="px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200">L2CS</span>
+          </div>
+        )}
 
         {/* Current Primary Detection Status & Live Behavior Event Counters */}
         <DetectionStats 
@@ -726,20 +868,66 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
         {/* Live Multi-Engine Benchmark Matrix (4 Models Concurrent Detection) */}
         {isActive && benchmarkMetrics && (
-          <div className="mb-6 p-4 bg-white border border-blue-200 rounded-2xl shadow-sm">
+          <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-white border border-blue-200 rounded-xl sm:rounded-2xl shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 border-b border-gray-100 pb-2">
               <h3 className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse shrink-0"></span>
-                <span>⚡ Live Benchmark Matrix (4 AI Models Concurrent System)</span>
+                <span className="leading-snug">⚡ Live Benchmark Matrix (4 AI Models Concurrent System)</span>
               </h3>
-              <span className="self-start sm:self-auto text-[11px] sm:text-xs bg-blue-50 text-blue-700 font-medium px-2.5 py-0.5 rounded-full border border-blue-200">
+              <span className="self-start sm:self-auto text-[10px] sm:text-xs bg-blue-50 text-blue-700 font-medium px-2.5 py-0.5 rounded-full border border-blue-200 break-words max-w-full">
                 {benchmarkMetrics.snapshotSynced
                   ? `synced ${benchmarkMetrics.snapshotId.slice(0, 8)}… · 4 engines · same frame`
-                  : `live preview · รอ synced snapshot (ต้องมี OpenFace server)`}
+                  : openFaceData?.source === 'openface-server'
+                    ? `live preview · OpenFace server online`
+                    : `live preview · รอ OpenFace server (docker compose up openface)`}
               </span>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* Mobile: card layout */}
+            <div className="md:hidden space-y-2">
+              <BenchmarkEngineMobileCard
+                name="MediaPipe (468 3D Mesh)"
+                metric={benchmarkMetrics.mediapipe}
+                statusLabel="DETECTING"
+                statusClassName="bg-green-100 text-green-800"
+                accentClassName="bg-green-50/40 border-green-100"
+              />
+              <BenchmarkEngineMobileCard
+                name="YOLOv8-Face (Bounding Box)"
+                metric={benchmarkMetrics.yolov8}
+                statusLabel="DETECTING"
+                statusClassName="bg-blue-100 text-blue-800"
+                accentClassName="bg-blue-50/40 border-blue-100"
+              />
+              <BenchmarkEngineMobileCard
+                name="Dlib (68-Point Landmark)"
+                metric={benchmarkMetrics.dlib}
+                statusLabel={benchmarkMetrics.dlib.isDetected ? 'DETECTING' : 'STANDBY'}
+                statusClassName={benchmarkMetrics.dlib.isDetected ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}
+                accentClassName="bg-amber-50/40 border-amber-100"
+              />
+              <BenchmarkEngineMobileCard
+                name="OpenFace (Action Units & Gaze)"
+                metric={benchmarkMetrics.openface}
+                statusLabel={
+                  benchmarkMetrics.openface.isDetected
+                    ? 'DETECTING'
+                    : openFaceData?.source === 'openface-server'
+                      ? 'STANDBY'
+                      : 'OFFLINE'
+                }
+                statusClassName={
+                  benchmarkMetrics.openface.isDetected
+                    ? 'bg-purple-100 text-purple-800'
+                    : openFaceData?.source === 'openface-server'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-gray-100 text-gray-600'
+                }
+                accentClassName="bg-purple-50/40 border-purple-100"
+              />
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 text-xs">
                 <thead className="bg-gray-50">
                   <tr>
@@ -749,7 +937,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Infer (เทียบได้)</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Score (0–1)</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Landmarks / Faces</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">JS Heap (tab)</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Confidence (kind)</th>
                   </tr>
                 </thead>
@@ -766,7 +953,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.mediapipe.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-green-600">{formatComparableScore(benchmarkMetrics.mediapipe.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.mediapipe)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.mediapipe)}</td>
                     <td className="px-3 py-2 font-bold text-green-600">{formatBenchmarkConfidence(benchmarkMetrics.mediapipe)}</td>
                   </tr>
                   <tr className="bg-blue-50/20">
@@ -781,7 +967,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.yolov8.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-blue-600">{formatComparableScore(benchmarkMetrics.yolov8.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.yolov8)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.yolov8)}</td>
                     <td className="px-3 py-2 font-bold text-blue-600">{formatBenchmarkConfidence(benchmarkMetrics.yolov8)}</td>
                   </tr>
                   <tr className="bg-amber-50/20">
@@ -800,7 +985,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.dlib.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-amber-600">{formatComparableScore(benchmarkMetrics.dlib.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.dlib)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.dlib)}</td>
                     <td className="px-3 py-2 font-bold text-amber-600">{formatBenchmarkConfidence(benchmarkMetrics.dlib)}</td>
                   </tr>
                   <tr className="bg-purple-50/20">
@@ -811,6 +995,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2">
                       {benchmarkMetrics.openface.isDetected ? (
                         <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                      ) : openFaceData?.source === 'openface-server' ? (
+                        <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded">STANDBY</span>
                       ) : (
                         <span className="bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded">OFFLINE</span>
                       )}
@@ -819,7 +1005,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.openface.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-purple-600">{formatComparableScore(benchmarkMetrics.openface.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.openface)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.openface)}</td>
                     <td className="px-3 py-2 font-bold text-purple-600">{formatBenchmarkConfidence(benchmarkMetrics.openface)}</td>
                   </tr>
                 </tbody>
@@ -880,10 +1065,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
         {/* Phase 1 YOLOv8 Intruder Alert Security Panel */}
         {isActive && yoloMultiFaceData?.hasMultipleFaces && (
-          <div className="mb-4 p-4 bg-red-900/20 border-2 border-red-500 rounded-xl text-red-200 animate-pulse">
-            <div className="flex items-center gap-2 font-bold text-red-400">
-              <span className="text-xl">🚨</span>
-              <span>[YOLOv8 Background Scanner] ตรวจพบบุคคลซ้อนในกล้อง ({yoloMultiFaceData.faceCount} คน)!</span>
+          <div className="mb-4 p-3 sm:p-4 bg-red-900/20 border-2 border-red-500 rounded-xl text-red-200 animate-pulse">
+            <div className="flex items-start gap-2 font-bold text-red-400 text-sm sm:text-base">
+              <span className="text-lg sm:text-xl shrink-0">🚨</span>
+              <span className="break-words">[YOLOv8 Background Scanner] ตรวจพบบุคคลซ้อนในกล้อง ({yoloMultiFaceData.faceCount} คน)!</span>
             </div>
             <p className="text-xs text-red-300 mt-1">
               ระบบตรวจจับผู้บุกรุก (Intruder Detection) กำลังทำงานในโหมด Background Scan เพื่อความปลอดภัยสูงสุด
@@ -900,9 +1085,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
             </div>
             <div className="max-h-32 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
               {violations.slice(0, 10).map((v) => (
-                <div key={v.id} className="p-2 bg-white rounded border border-red-100 flex justify-between items-center text-[11px]">
-                  <span className="font-medium text-red-700">{v.message}</span>
-                  <span className="text-gray-400 text-[10px]">{new Date(v.timestamp).toLocaleTimeString('th-TH')}</span>
+                <div key={v.id} className="p-2 bg-white rounded border border-red-100 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 text-[11px]">
+                  <span className="font-medium text-red-700 break-words">{v.message}</span>
+                  <span className="text-gray-400 text-[10px] shrink-0">{new Date(v.timestamp).toLocaleTimeString('th-TH')}</span>
                 </div>
               ))}
             </div>
@@ -916,7 +1101,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
             <p className="text-sm text-red-600">{apiError}</p>
             <button 
               onClick={() => setApiError(null)}
-              className="mt-2 px-3 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded border"
+              className="mt-2 px-4 py-2.5 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded border min-h-[44px]"
             >
               ปิด
             </button>
@@ -935,8 +1120,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
         {/* Recording Status Display */}
         {isActive && (
-          <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <h3 className="text-lg font-semibold text-blue-800 mb-3">📊 สถานะการบันทึกข้อมูล</h3>
+          <div className="mb-4 p-3 sm:p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <h3 className="text-base sm:text-lg font-semibold text-blue-800 mb-3">📊 สถานะการบันทึกข้อมูล</h3>
             
             <div className="flex items-center gap-2">
               <div className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-gray-300'}`}></div>
@@ -949,10 +1134,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
         {/* Live Orientation Statistics */}
         {orientationStats && isRecording && (
-          <div className="mb-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
-            <h3 className="text-lg font-semibold text-purple-800 mb-3">📈 สถิติการหันหน้า (แบบเรียลไทม์)</h3>
+          <div className="mb-4 p-3 sm:p-4 bg-purple-50 rounded-lg border border-purple-200">
+            <h3 className="text-base sm:text-lg font-semibold text-purple-800 mb-3">📈 สถิติการหันหน้า (แบบเรียลไทม์)</h3>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4 mb-3">
               <div className="text-center p-2 bg-white rounded border">
                 <div className="text-2xl font-bold text-blue-600">{orientationStats.leftTurns.count}</div>
                 <div className="text-sm text-gray-600">หันซ้าย</div>
@@ -993,11 +1178,11 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
               </div>
             </div>
             
-            <div className="flex justify-between text-sm text-gray-600 mt-3">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-between gap-1 text-xs sm:text-sm text-gray-600 mt-3">
               <span>📊 รวม {orientationStats.totalEvents} events</span>
-              <span>🕐 เริ่มบันทึก: {orientationStats.sessionStartTime}</span>
+              <span className="break-words">🕐 เริ่มบันทึก: {orientationStats.sessionStartTime}</span>
               {orientationStats.lastEventTime && (
-                <span>🕐 Event ล่าสุด: {orientationStats.lastEventTime}</span>
+                <span className="break-words">🕐 Event ล่าสุด: {orientationStats.lastEventTime}</span>
               )}
             </div>
           </div>

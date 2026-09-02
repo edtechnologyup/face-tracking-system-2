@@ -20,9 +20,8 @@ export async function persistSyncedBenchmarkLogs(
   if (!snapshotId) {
     return { persisted: false, skippedDuplicate: false, enginesWritten: 0, snapshotId: null };
   }
-  if (!benchmarkMetrics.snapshotSynced) {
-    return { persisted: false, skippedDuplicate: false, enginesWritten: 0, snapshotId };
-  }
+
+  const snapshotSynced = benchmarkMetrics.snapshotSynced === true;
 
   const existing = await prisma.mediaPipeLog.findFirst({
     where: { sessionId, benchmarkSnapshotId: snapshotId },
@@ -42,7 +41,7 @@ export async function persistSyncedBenchmarkLogs(
           ...benchmarkMetricToDbBase(
             benchmarkMetrics.mediapipe,
             snapshotId,
-            true
+            snapshotSynced
           ),
         },
       });
@@ -53,7 +52,7 @@ export async function persistSyncedBenchmarkLogs(
       await tx.yolov8Log.create({
         data: {
           sessionId,
-          ...benchmarkMetricToDbBase(benchmarkMetrics.yolov8, snapshotId, true),
+          ...benchmarkMetricToDbBase(benchmarkMetrics.yolov8, snapshotId, snapshotSynced),
         },
       });
       enginesWritten += 1;
@@ -63,7 +62,7 @@ export async function persistSyncedBenchmarkLogs(
       await tx.dlibLog.create({
         data: {
           sessionId,
-          ...benchmarkMetricToDbBase(benchmarkMetrics.dlib, snapshotId, true),
+          ...benchmarkMetricToDbBase(benchmarkMetrics.dlib, snapshotId, snapshotSynced),
         },
       });
       enginesWritten += 1;
@@ -73,7 +72,7 @@ export async function persistSyncedBenchmarkLogs(
       await tx.openFaceLog.create({
         data: {
           sessionId,
-          ...benchmarkMetricToDbBase(benchmarkMetrics.openface, snapshotId, true),
+          ...benchmarkMetricToDbBase(benchmarkMetrics.openface, snapshotId, snapshotSynced),
           serverLatencyMs: benchmarkMetrics.openface.serverLatencyMs ?? null,
           resultAgeMs:
             benchmarkMetrics.openface.resultAgeMs != null

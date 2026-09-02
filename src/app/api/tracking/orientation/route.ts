@@ -4,7 +4,10 @@ import { Prisma } from '@prisma/client'
 import jwt from 'jsonwebtoken'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limiter'
 import { persistSyncedBenchmarkLogs } from '@/lib/benchmark-log-persist'
-import { SUSTAINED_DURATION_SEC } from '@/lib/mediapipe-detector'
+import {
+  filterNewTrackingLogs,
+  fingerprintFromExistingLog,
+} from '@/lib/tracking-log-dedup'
 import type { MultiEngineBenchmarkPayload } from '@/lib/engine-benchmark'
 
 // Interface สำหรับ request body
@@ -59,7 +62,7 @@ interface OrientationLogRequest {
   benchmarkMetrics?: MultiEngineBenchmarkPayload;
 }
 
-// CBMI Parameter Adjustment Guide: ข้าม event ที่มีระยะเวลาสั้นกว่า SUSTAINED_DURATION_SEC ก่อนบันทึกลงฐานข้อมูล
+// บันทึก event-level logs แบบเดียวกับ tracking_logs ใน CSV export (ทุก completed event)
 
 // บันทึกข้อมูล orientation tracking
 export async function POST(request: NextRequest) {
@@ -112,12 +115,9 @@ export async function POST(request: NextRequest) {
     // เตรียมข้อมูล logs ทั้งหมด
     const logsData: Prisma.TrackingLogCreateManyInput[] = []
 
-    // 1. เพิ่ม orientation events
+    // 1. เพิ่ม orientation events (completed events — รวม duration สั้น ๆ เหมือน CSV export)
     events.forEach(event => {
-      // ข้าม event ที่ duration สั้นกว่าเกณฑ์ Sustained Duration ก่อนบันทึกลงฐานข้อมูล
-      if (typeof event.duration === 'number' && event.duration < SUSTAINED_DURATION_SEC) {
-        return
-      }
+      if (event.isActive || !event.endTime) return
       logsData.push({
         sessionId: sessionId,
         detectionType: 'FACE_ORIENTATION',
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
           direction: event.direction,
           startTime: event.startTime,
           endTime: event.endTime,
-          duration: event.duration,
+          duration: event.duration ?? 0,
           maxYaw: event.maxYaw,
           maxPitch: event.maxPitch
         },
@@ -137,14 +137,14 @@ export async function POST(request: NextRequest) {
     let lossLogsCount = 0
     if (faceDetectionLossEvents && faceDetectionLossEvents.length > 0) {
       faceDetectionLossEvents.forEach(event => {
-        if (!event.isActive && event.endTime && event.duration && event.duration >= SUSTAINED_DURATION_SEC) {
+        if (!event.isActive && event.endTime) {
           logsData.push({
             sessionId: sessionId,
             detectionType: 'FACE_DETECTION_LOSS',
             detectionData: {
               startTime: event.startTime,
               endTime: event.endTime,
-              duration: event.duration,
+              duration: event.duration ?? 0,
               isMismatch: event.isMismatch || false,
               reason: event.reason || undefined
             },
@@ -185,49 +185,70 @@ export async function POST(request: NextRequest) {
     let logsCreated = 0
 
     if (logsData.length > 0) {
-      // ดึง timestamp ของ log ล่าสุดที่เคยบันทึกไว้ เพื่อกรองเฉพาะ events ใหม่
-      const lastLog = await prisma.trackingLog.findFirst({
-        where: { 
-          sessionId: sessionId,
+      const existingLogs = await prisma.trackingLog.findMany({
+        where: {
+          sessionId,
           detectionType: {
-            in: ['FACE_ORIENTATION', 'FACE_DETECTION_LOSS', 'SECURITY_VIOLATION']
-          }
+            in: ['FACE_ORIENTATION', 'FACE_DETECTION_LOSS', 'SECURITY_VIOLATION'],
+          },
         },
-        orderBy: { timestamp: 'desc' },
-        select: { timestamp: true }
+        select: { detectionType: true, detectionData: true },
       })
 
-      // กรองเฉพาะ events ที่มี startTime ใหม่กว่า log ล่าสุด
-      const lastTimestamp = lastLog?.timestamp || new Date(0)
-      const newLogsData = logsData.filter(log => {
-        const detectionData = log.detectionData as Record<string, unknown> | null
-        if (detectionData && typeof detectionData === 'object') {
-          const startTimeStr = (detectionData as Record<string, unknown>).startTime as string | undefined
-          const timestampStr = (detectionData as Record<string, unknown>).timestamp as string | undefined
-          const eventTime = startTimeStr ? new Date(startTimeStr) : 
-                           timestampStr ? new Date(timestampStr) : new Date()
-          return eventTime > lastTimestamp
-        }
-        return true // ถ้าไม่มี detectionData ให้บันทึกไว้ก่อน
-      })
+      const existingFingerprints = new Set<string>()
+      for (const log of existingLogs) {
+        const fp = fingerprintFromExistingLog(log)
+        if (fp) existingFingerprints.add(fp)
+      }
+
+      const newLogsData = filterNewTrackingLogs(logsData, existingFingerprints)
 
       if (newLogsData.length > 0) {
         const batchResult = await prisma.trackingLog.createMany({
-          data: newLogsData
+          data: newLogsData,
         })
         logsCreated = batchResult.count
       }
     }
 
-    // บันทึกลงตารางโมเดลแยกแต่ละตัว — เฉพาะ synced snapshot (4 engine, frame เดียวกัน)
+    // บันทึกลงตารางโมเดลแยกแต่ละตัว (snapshotSynced=true = 4 engine same frame)
+    let benchmarkPersist: {
+      persisted: boolean
+      skippedDuplicate: boolean
+      enginesWritten: number
+      snapshotId: string | null
+    } | null = null
     if (benchmarkMetrics) {
-      const persistResult = await persistSyncedBenchmarkLogs(sessionId, benchmarkMetrics)
-      if (!persistResult.persisted && !persistResult.skippedDuplicate) {
+      try {
+        const persistResult = await persistSyncedBenchmarkLogs(sessionId, benchmarkMetrics)
+        benchmarkPersist = {
+          persisted: persistResult.persisted,
+          skippedDuplicate: persistResult.skippedDuplicate,
+          enginesWritten: persistResult.enginesWritten,
+          snapshotId: persistResult.snapshotId,
+        }
+        if (persistResult.persisted) {
+          console.log(
+            `[orientation] model logs saved: ${persistResult.enginesWritten} engines, snapshot=${persistResult.snapshotId}, synced=${benchmarkMetrics.snapshotSynced === true}`
+          )
+        } else if (persistResult.skippedDuplicate) {
+          console.log('[orientation] skipped duplicate benchmarkSnapshotId', persistResult.snapshotId)
+        } else if (!benchmarkMetrics.snapshotId) {
+          console.warn('[orientation] model logs skipped: missing snapshotId')
+        }
+      } catch (benchmarkErr) {
+        const code =
+          benchmarkErr &&
+          typeof benchmarkErr === 'object' &&
+          'code' in benchmarkErr
+            ? String((benchmarkErr as { code?: string }).code)
+            : null
         console.warn(
-          '[orientation] benchmark snapshot not synced across 4 engines — skip model logs (need OpenFace server)'
+          '[orientation] benchmark model logs skipped:',
+          code === 'P2022'
+            ? 'DB schema out of date — run: npm run db:catch-up-models'
+            : benchmarkErr
         )
-      } else if (persistResult.skippedDuplicate) {
-        console.log('[orientation] skipped duplicate benchmarkSnapshotId', persistResult.snapshotId)
       }
     }
 
@@ -277,6 +298,7 @@ export async function POST(request: NextRequest) {
         logsCreated: logsCreated,
         orientationLogsCreated: events.length,
         faceDetectionLossLogCreated: lossLogsCount,
+        benchmarkPersist,
         sessionStatistics: sessionStatistics,
         summary: {
           totalEvents: sessionStats.totalEvents,

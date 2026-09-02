@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "db:push": "prisma db push --accept-data-loss",
+    "db:catch-up": "prisma db execute --schema prisma/schema.prisma --file prisma/scripts/catch-up-behavior-feature-logs.sql && prisma db execute --schema prisma/schema.prisma --file prisma/scripts/catch-up-model-benchmark-logs.sql",
+    "db:catch-up-models": "prisma db execute --schema prisma/schema.prisma --file prisma/scripts/catch-up-model-benchmark-logs.sql",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",

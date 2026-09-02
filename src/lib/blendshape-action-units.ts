@@ -68,7 +68,7 @@ export function extractEyeOpennessFromBlendshapes(
   };
 }
 
-/** @deprecated use extractEyeOpennessFromBlendshapes for behavior logs (L0) */
+/** Eye openness 0–1: blendshapes (L0) when available, else EAR-derived (L2). */
 export function extractEyeOpenness(
   blendshapes: Record<string, number> | undefined,
   leftEAR?: number | null,

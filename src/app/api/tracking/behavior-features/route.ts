@@ -70,6 +70,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const session = await prisma.trackingSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true },
+    })
+    if (!session) {
+      return NextResponse.json(
+        { error: 'Tracking session not found', code: 'SESSION_NOT_FOUND' },
+        { status: 404 }
+      )
+    }
+
     // Cap batch size to prevent oversized payloads crashing the server
     const MAX_BATCH_SIZE = 100
     const safeLogs = logs.slice(0, MAX_BATCH_SIZE)
@@ -143,7 +154,6 @@ export async function POST(request: NextRequest) {
       cameraStreamFps: log.cameraStreamFps ?? null,
       sampleRateHz: log.sampleRateHz ?? null,
 
-      deviceTier: log.deviceTier ?? null,
       trackingProfile: log.trackingProfile ?? null,
       userAgent: log.userAgent ?? null,
       researchEligible:
@@ -185,10 +195,17 @@ export async function POST(request: NextRequest) {
         {
           error: 'Database schema out of date (missing column on behavior_feature_logs)',
           details:
-            'Run: npx prisma db execute --file prisma/scripts/catch-up-behavior-feature-logs.sql',
+            'Run: npm run db:catch-up',
           code: 'P2022',
         },
         { status: 503 }
+      )
+    }
+
+    if (prismaCode === 'P2003') {
+      return NextResponse.json(
+        { error: 'Tracking session not found', code: 'SESSION_NOT_FOUND' },
+        { status: 404 }
       )
     }
 

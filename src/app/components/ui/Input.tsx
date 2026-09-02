@@ -26,7 +26,7 @@ export function Input({
       <label className="block text-sm font-medium text-gray-700">
         {label} {required && <span className="text-purple-500">*</span>}
       </label>
-      <div className="relative">
+      <div className="relative w-full min-w-0">
         <input
           type={type}
           value={value}
@@ -34,7 +34,7 @@ export function Input({
           onBlur={onBlur}
           placeholder={placeholder}
           required={required}
-          className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300 transition-colors ${
+          className={`w-full min-w-0 box-border px-4 py-3 text-base text-gray-900 bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300 transition-colors ${
             error ? 'border-red-300' : 'border-gray-300 focus:border-purple-400'
           } ${loading ? 'pr-10' : ''}`}
         />

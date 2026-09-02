@@ -23,8 +23,6 @@ export interface YOLOv8DetectionResult {
   keypoints?: Array<{ x: number; y: number }>;
   latencyMs: number;
   fps: number;
-  memoryMb: number;
-  cpuLoadPct: number;
 }
 
 export interface YOLOv8MultiFaceResult {
@@ -37,8 +35,6 @@ export interface YOLOv8MultiFaceResult {
   keypoints?: Array<{ x: number; y: number }>;
   latencyMs: number;
   fps: number;
-  memoryMb: number;
-  cpuLoadPct: number;
   timestamp: number;
 }
 
@@ -50,8 +46,6 @@ const emptyMulti = (now: number): YOLOv8MultiFaceResult => ({
   confidence: 0,
   latencyMs: 0,
   fps: 0,
-  memoryMb: 0,
-  cpuLoadPct: 0,
   timestamp: now,
 });
 
@@ -149,8 +143,6 @@ export class YOLOv8FaceDetector {
           : [],
         latencyMs,
         fps: this.lastFps,
-        memoryMb: 0,
-        cpuLoadPct: 0,
         timestamp: now,
       };
 

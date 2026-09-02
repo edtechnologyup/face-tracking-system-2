@@ -131,6 +131,7 @@ export function RegisterForm({
         showStrength={true}
         showToggle={true}
         error={errors.password}
+        autoComplete="new-password"
       />
 
       <PasswordInput
@@ -142,6 +143,7 @@ export function RegisterForm({
         showStrength={false}
         showToggle={false}
         error={errors.confirmPassword}
+        autoComplete="new-password"
       />
     </>
   )

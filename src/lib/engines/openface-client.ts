@@ -68,8 +68,6 @@ export function mapRemoteToOpenFaceResult(
     confidence: remote.confidence,
     latencyMs: roundTripMs,
     fps: roundTripMs > 0 ? Number((1000 / roundTripMs).toFixed(1)) : 0,
-    memoryMb: 0,
-    cpuLoadPct: 0,
     source: 'openface-server',
     timestamp,
     serverLatencyMs: remote.latencyMs,

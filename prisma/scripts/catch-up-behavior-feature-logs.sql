@@ -7,6 +7,7 @@
 -- BehaviorScenario enum values
 ALTER TYPE "BehaviorScenario" ADD VALUE IF NOT EXISTS 'LOOK_UP';
 ALTER TYPE "BehaviorScenario" ADD VALUE IF NOT EXISTS 'EYES_CLOSED_DISENGAGED';
+ALTER TYPE "BehaviorScenario" ADD VALUE IF NOT EXISTS 'DIM_LIGHT';
 
 -- featureProvenance (20250901172600)
 ALTER TABLE "behavior_feature_logs" ADD COLUMN IF NOT EXISTS "featureProvenance" JSONB;
@@ -105,13 +106,9 @@ UPDATE "behavior_feature_logs"
 SET "sampleRateHz" = 2
 WHERE "sampleRateHz" IS NULL;
 
--- device tier + tracking profile (20250901220000)
-ALTER TABLE "behavior_feature_logs" ADD COLUMN IF NOT EXISTS "deviceTier" TEXT;
+-- tracking profile (20250901220000)
 ALTER TABLE "behavior_feature_logs" ADD COLUMN IF NOT EXISTS "trackingProfile" TEXT;
 ALTER TABLE "behavior_feature_logs" ADD COLUMN IF NOT EXISTS "userAgent" TEXT;
-
-CREATE INDEX IF NOT EXISTS "behavior_feature_logs_deviceTier_idx"
-  ON "behavior_feature_logs"("deviceTier");
 
 -- researchEligible (20250901230000)
 ALTER TABLE "behavior_feature_logs" ADD COLUMN IF NOT EXISTS "researchEligible" BOOLEAN;
@@ -119,8 +116,10 @@ ALTER TABLE "behavior_feature_logs" ADD COLUMN IF NOT EXISTS "researchEligible" 
 CREATE INDEX IF NOT EXISTS "behavior_feature_logs_researchEligible_idx"
   ON "behavior_feature_logs"("researchEligible");
 
--- Optional model log columns (20250901230000)
-ALTER TABLE "model_mediapipe_logs" ADD COLUMN IF NOT EXISTS "deviceTier" TEXT;
-ALTER TABLE "model_yolov8_logs" ADD COLUMN IF NOT EXISTS "deviceTier" TEXT;
-ALTER TABLE "model_dlib_logs" ADD COLUMN IF NOT EXISTS "deviceTier" TEXT;
-ALTER TABLE "model_openface_logs" ADD COLUMN IF NOT EXISTS "deviceTier" TEXT;
+-- Remove deprecated deviceTier columns (no longer stored by app)
+DROP INDEX IF EXISTS "behavior_feature_logs_deviceTier_idx";
+ALTER TABLE "behavior_feature_logs" DROP COLUMN IF EXISTS "deviceTier";
+ALTER TABLE "model_mediapipe_logs" DROP COLUMN IF EXISTS "deviceTier";
+ALTER TABLE "model_yolov8_logs" DROP COLUMN IF EXISTS "deviceTier";
+ALTER TABLE "model_dlib_logs" DROP COLUMN IF EXISTS "deviceTier";
+ALTER TABLE "model_openface_logs" DROP COLUMN IF EXISTS "deviceTier";

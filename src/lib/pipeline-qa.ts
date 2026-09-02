@@ -7,8 +7,11 @@ import {
   FEATURE_VALID_PHASES,
 } from '@/lib/experiment-phase';
 import {
+  BRIGHTNESS_DIM_LIGHT_THRESHOLD,
   BRIGHTNESS_MIN_THRESHOLD,
+  CONTRAST_MIN_THRESHOLD,
   DISTANCE_THRESHOLD_CM,
+  SHARPNESS_MIN_THRESHOLD,
   OCCLUSION_VALID_THRESHOLD,
   YAW_THRESHOLD,
 } from '@/lib/mediapipe-detector';
@@ -73,6 +76,7 @@ export const VALID_SCENARIOS = [
   'OCCLUSION',
   'MULTIPLE_FACES',
   'LOW_LIGHT',
+  'DIM_LIGHT',
   'DISTANCE_1M',
   'EYES_CLOSED_DISENGAGED',
   'NATURAL_READING',
@@ -287,6 +291,43 @@ export function validateBehaviorLogEntry(log: LogEntry): QaReport {
       field: 'scenario',
       severity: 'warn',
       message: 'LOW_LIGHT scenario but brightness above threshold',
+    });
+  }
+
+  if (
+    log.scenario === 'DIM_LIGHT' &&
+    typeof log.brightnessMean === 'number' &&
+    (log.brightnessMean < BRIGHTNESS_MIN_THRESHOLD ||
+      log.brightnessMean >= BRIGHTNESS_DIM_LIGHT_THRESHOLD)
+  ) {
+    issues.push({
+      field: 'scenario',
+      severity: 'warn',
+      message: 'DIM_LIGHT scenario but brightness outside 0.20–0.35 envelope',
+    });
+  }
+
+  if (
+    log.isValid === true &&
+    typeof log.contrastScore === 'number' &&
+    log.contrastScore < CONTRAST_MIN_THRESHOLD
+  ) {
+    issues.push({
+      field: 'contrastScore',
+      severity: 'warn',
+      message: 'isValid=true but contrast below CBMI threshold',
+    });
+  }
+
+  if (
+    log.isValid === true &&
+    typeof log.sharpnessScore === 'number' &&
+    log.sharpnessScore < SHARPNESS_MIN_THRESHOLD
+  ) {
+    issues.push({
+      field: 'sharpnessScore',
+      severity: 'warn',
+      message: 'isValid=true but sharpness below CBMI threshold',
     });
   }
 
