@@ -7,7 +7,7 @@ import {
   type AttentionState,
 } from '@/lib/behavior-rule-labeler'
 import { type NaturalReadingState } from '@/lib/natural-reading-detector'
-import { extractEyeOpennessFromBlendshapes } from '@/lib/blendshape-action-units'
+import { extractEyeOpenness } from '@/lib/blendshape-action-units'
 import { buildBehaviorFeatureProvenance, slimFeatureProvenance } from '@/lib/feature-provenance'
 import {
   buildTrackingRuntimeConfig,
@@ -41,6 +41,7 @@ import {
   isOpenFaceResultFresh,
   OPENFACE_LOG_MAX_STALE_MS,
 } from '@/lib/engines/openface-constants'
+import toast from 'react-hot-toast'
 
 import { HEAD_ROLL_DISTANCE_INVALID_DEG } from '@/lib/distance-occlusion';
 import {
@@ -60,6 +61,44 @@ import {
 const HEAD_ROLL_SMOOTH_WINDOW = 5;
 const SYNC_BATCH_SIZE = 8;
 const RETRY_BUFFER_MAX = 300;
+let behaviorDbSchemaWarned = false;
+
+async function postBehaviorFeatureLogs(
+  sessionId: string,
+  logs: unknown[],
+  keepalive = false
+): Promise<boolean> {
+  try {
+    const res = await fetch('/api/tracking/behavior-features', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive,
+      body: JSON.stringify({ sessionId, logs }),
+    })
+
+    if (res.ok) return true
+
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string
+      details?: string
+      code?: string
+    }
+    console.warn('[behavior-features] sync failed', res.status, body)
+
+    if (res.status === 503 && body.code === 'P2022' && !behaviorDbSchemaWarned) {
+      behaviorDbSchemaWarned = true
+      toast.error(
+        'บันทึก behavior log ไม่ได้ — schema DB ไม่ตรง รัน: npm run db:catch-up',
+        { duration: 8000 }
+      )
+    }
+
+    return false
+  } catch (err) {
+    console.error('Failed to sync behavior features:', err)
+    return false
+  }
+}
 
 function calcMediaPipeEAR(lms: any[], p1: number, p2: number, p3: number, p4: number, p5: number, p6: number): number | null {
   if (!lms[p1] || !lms[p6]) return null;
@@ -304,7 +343,7 @@ export function BehaviorFeatureSync({
     const actionUnits = faceDetected ? (mediaPipeData?.actionUnits ?? null) : null;
     const eyeOpenness =
       faceDetected && lms?.length
-        ? extractEyeOpennessFromBlendshapes(actionUnits?.blendshapes)
+        ? extractEyeOpenness(actionUnits?.blendshapes, leftEAR, rightEAR)
         : { left: null, right: null };
 
     let headRollForRules = faceDetected ? (mediaPipeData?.headRoll ?? null) : null;
@@ -314,6 +353,20 @@ export function BehaviorFeatureSync({
       headRollForRules = Number((Math.atan2(dy, dx) * (180 / Math.PI)).toFixed(1));
     }
 
+    const gazeFieldsForRules = faceDetected
+      ? resolveGazeLogFields({
+          l2csFresh: l2csOnnxFresh,
+          l2csGaze: l2csOnnxFresh
+            ? {
+                gazeYaw: l2csGazeData.gazeYaw,
+                gazePitch: l2csGazeData.gazePitch,
+                confidence: l2csGazeData.confidence,
+              }
+            : null,
+          irisGaze: irisGaze ?? null,
+        })
+      : resolveGazeLogFields({ l2csFresh: false, irisGaze: null });
+
     const ruleResult = labelBehaviorFromFeatures({
       now,
       hasFace,
@@ -322,6 +375,8 @@ export function BehaviorFeatureSync({
       pitch,
       occlusionScore: currentOcclusionScore,
       brightnessMean: latestQualityRef.current.brightnessMean,
+      contrastScore: latestQualityRef.current.contrastScore,
+      sharpnessScore: latestQualityRef.current.sharpnessScore,
       faceDistanceCm: distanceEstimate.reliable ? distanceEstimate.estimatedCm : null,
       isTooFar: distanceEstimate.isTooFar,
       leftEAR,
@@ -330,6 +385,9 @@ export function BehaviorFeatureSync({
       rightEyeOpenness: eyeOpenness.right,
       headRoll: headRollForRules,
       headPitch: mediaPipeData?.orientation?.pitch ?? null,
+      gazeYaw: gazeFieldsForRules.gazeYaw,
+      gazePitch: gazeFieldsForRules.gazePitch,
+      gazeConfidence: gazeFieldsForRules.gazeConfidence,
       qualityReady: qualityReadyRef.current,
       hasGaze,
       landmarkCount: lms?.length ?? 0,
@@ -366,19 +424,7 @@ export function BehaviorFeatureSync({
     const openfaceSource = openFaceData?.source ?? 'none';
     const openfaceConf = openfaceFresh ? openFaceData.confidence : null;
 
-    const gazeFields = faceDetected
-      ? resolveGazeLogFields({
-          l2csFresh: l2csOnnxFresh,
-          l2csGaze: l2csOnnxFresh
-            ? {
-                gazeYaw: l2csGazeData.gazeYaw,
-                gazePitch: l2csGazeData.gazePitch,
-                confidence: l2csGazeData.confidence,
-              }
-            : null,
-          irisGaze: irisGaze ?? null,
-        })
-      : resolveGazeLogFields({ l2csFresh: false, irisGaze: null });
+    const gazeFields = gazeFieldsForRules;
 
     let dlibDetectionBoxNormalized = null as ReturnType<typeof normalizeDlibBox> | null;
     if (dlibFresh && dlibData?.detectionBox) {
@@ -454,7 +500,6 @@ export function BehaviorFeatureSync({
       detectionFps: null,
       cameraStreamFps: null,
       sampleRateHz: sampleRateHz,
-      deviceTier: trackingConfigRef.current.tier,
       trackingProfile: trackingConfigRef.current.profile,
       userAgent: trackingConfigRef.current.userAgent,
       researchEligible: isResearchEligible({
@@ -478,6 +523,8 @@ export function BehaviorFeatureSync({
         yoloPrimaryConfidence: yoloConf,
         yoloPrimaryBoxNormalized,
         mediapipeBlendshapes: !!actionUnits?.blendshapes,
+        leftEarForOpenness: leftEAR != null && leftEAR > 0,
+        rightEarForOpenness: rightEAR != null && rightEAR > 0,
         faceCountSource,
         dlibStaleMs,
         dlibDetected: !!dlibData?.isDetected,
@@ -578,20 +625,15 @@ export function BehaviorFeatureSync({
     // Auto-sync every SYNC_BATCH_SIZE samples (~4 seconds at 2Hz)
     if (logBufferRef.current.length >= SYNC_BATCH_SIZE) {
       const logsToSend = [...logBufferRef.current]
-      logBufferRef.current = [] // reset buffer
-      
-      // Send to API in background
-      fetch('/api/tracking/behavior-features', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          logs: logsToSend
-        })
-      }).catch(err => {
-        console.error('Failed to sync behavior features:', err)
-        // Re-queue failed logs back to buffer for retry
-        logBufferRef.current = [...logsToSend, ...logBufferRef.current].slice(0, RETRY_BUFFER_MAX)
+      logBufferRef.current = []
+
+      void postBehaviorFeatureLogs(sessionId, logsToSend).then((ok) => {
+        if (!ok) {
+          logBufferRef.current = [...logsToSend, ...logBufferRef.current].slice(
+            0,
+            RETRY_BUFFER_MAX
+          )
+        }
       })
     }
     }
@@ -622,15 +664,7 @@ export function BehaviorFeatureSync({
         const logsToSend = [...logBufferRef.current]
         logBufferRef.current = []
         
-        fetch('/api/tracking/behavior-features', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true, // Ensure it sends even if page closes
-          body: JSON.stringify({
-            sessionId,
-            logs: logsToSend
-          })
-        }).catch(err => console.error('Final sync failed:', err))
+        void postBehaviorFeatureLogs(sessionId, logsToSend, true)
       }
     }
   }, [sessionId])

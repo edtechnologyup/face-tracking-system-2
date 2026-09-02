@@ -22,8 +22,6 @@ export interface EngineBenchmarkMetric {
   frameSynced: boolean;
   landmarksCount: number | null;
   faceCount: number | null;
-  memoryMb: number | null;
-  cpuLoadPct: number | null;
   confidence: number | null;
   confidenceKind: ConfidenceKind;
   measuredAt: string;
@@ -34,7 +32,6 @@ export interface EngineBenchmarkMetric {
 export interface MultiEngineBenchmarkPayload {
   snapshotId: string;
   capturedAt: string;
-  browserHeapMb: number | null;
   /** All 4 engines ran on the same captured frame */
   snapshotSynced: boolean;
   enginesCaptured: number;
@@ -49,14 +46,6 @@ export function createBenchmarkSnapshotId(): string {
     return crypto.randomUUID();
   }
   return `bm-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-export function readBrowserHeapMb(): number | null {
-  if (typeof performance === 'undefined') return null;
-  const perf = performance as Performance & { memory?: { usedJSHeapSize: number } };
-  const bytes = perf.memory?.usedJSHeapSize;
-  if (bytes == null || bytes <= 0) return null;
-  return Number((bytes / (1024 * 1024)).toFixed(1));
 }
 
 export function latencyToFps(latencyMs: number | null | undefined): number | null {
@@ -111,6 +100,10 @@ export interface BuildBenchmarkInput {
     clientRoundTripMs: number | null;
     serverLatencyMs: number | null;
     resultTimestamp?: number | null;
+    /** RetinaFace face count (0/1 for single-frame analyze). */
+    faceCount?: number | null;
+    /** Number of action units returned by OpenFace multitask head. */
+    actionUnitCount?: number | null;
   } | null;
   now?: number;
   /** When true, all engines ran on the same captured frame (OpenFace on same JPEG). */
@@ -145,7 +138,6 @@ function buildEngineMetric(
 export function buildMultiEngineBenchmark(input: BuildBenchmarkInput): MultiEngineBenchmarkPayload {
   const now = input.now ?? Date.now();
   const capturedAt = new Date(now).toISOString();
-  const heapMb = readBrowserHeapMb();
   const snapshotId = input.snapshotId ?? createBenchmarkSnapshotId();
   const frameSynced = input.snapshotSynced ?? false;
 
@@ -171,8 +163,6 @@ export function buildMultiEngineBenchmark(input: BuildBenchmarkInput): MultiEngi
       latencyScope: 'browserInference',
       landmarksCount: input.mpLandmarksCount,
       faceCount: null,
-      memoryMb: heapMb,
-      cpuLoadPct: null,
       confidence: Number(input.mpConfidence.toFixed(3)),
       confidenceKind: 'trackingQuality',
       measuredAt: capturedAt,
@@ -190,8 +180,6 @@ export function buildMultiEngineBenchmark(input: BuildBenchmarkInput): MultiEngi
       latencyScope: 'browserInference',
       landmarksCount: null,
       faceCount: input.yolo?.faceCount ?? null,
-      memoryMb: heapMb,
-      cpuLoadPct: null,
       confidence:
         input.yolo?.confidence != null ? Number(input.yolo.confidence.toFixed(3)) : null,
       confidenceKind: 'faceBoxScore',
@@ -210,8 +198,6 @@ export function buildMultiEngineBenchmark(input: BuildBenchmarkInput): MultiEngi
       latencyScope: 'browserInference',
       landmarksCount: input.dlib?.landmarksCount ?? null,
       faceCount: null,
-      memoryMb: heapMb,
-      cpuLoadPct: null,
       confidence:
         input.dlib?.confidence != null ? Number(input.dlib.confidence.toFixed(3)) : null,
       confidenceKind: 'detectorScore',
@@ -228,10 +214,9 @@ export function buildMultiEngineBenchmark(input: BuildBenchmarkInput): MultiEngi
       fps: latencyToFps(of?.serverLatencyMs ?? of?.clientRoundTripMs),
       latencyMs: of?.clientRoundTripMs ?? null,
       latencyScope: of?.serverLatencyMs != null ? 'serverInference' : 'networkRoundTrip',
-      landmarksCount: null,
-      faceCount: null,
-      memoryMb: null,
-      cpuLoadPct: null,
+      landmarksCount: of?.actionUnitCount ?? null,
+      faceCount:
+        of != null ? (of.faceCount ?? (of.isDetected ? 1 : 0)) : null,
       confidence: of?.confidence != null ? Number(of.confidence.toFixed(3)) : null,
       confidenceKind: 'retinaFaceScore',
       measuredAt: capturedAt,
@@ -244,13 +229,140 @@ export function buildMultiEngineBenchmark(input: BuildBenchmarkInput): MultiEngi
   return {
     snapshotId,
     capturedAt,
-    browserHeapMb: heapMb,
     snapshotSynced,
     enginesCaptured,
     mediapipe,
     yolov8,
     dlib,
     openface,
+  };
+}
+
+/** Event-driven model log row (not same-frame synced benchmark). */
+export function buildMediaPipeEventMetric(input: {
+  mpLatencyMs: number;
+  mpIsDetected: boolean;
+  mpConfidence: number;
+  mpLandmarksCount: number;
+  measuredAt?: string;
+}): EngineBenchmarkMetric {
+  return buildEngineMetric(
+    {
+      engineKey: 'mediapipe',
+      name: 'MediaPipe (468 3D Mesh)',
+      isDetected: input.mpIsDetected,
+      fps: latencyToFps(input.mpLatencyMs),
+      latencyMs: Number(input.mpLatencyMs.toFixed(1)),
+      latencyScope: 'browserInference',
+      landmarksCount: input.mpLandmarksCount,
+      faceCount: null,
+      confidence: Number(input.mpConfidence.toFixed(3)),
+      confidenceKind: 'trackingQuality',
+      measuredAt: input.measuredAt ?? new Date().toISOString(),
+    },
+    false
+  );
+}
+
+export function buildYolov8EventMetric(input: {
+  isDetected: boolean;
+  latencyMs: number;
+  confidence: number;
+  faceCount: number;
+  measuredAt?: string;
+}): EngineBenchmarkMetric {
+  return buildEngineMetric(
+    {
+      engineKey: 'yolov8',
+      name: 'YOLOv8-Face (ONNX)',
+      isDetected: input.isDetected,
+      fps: latencyToFps(input.latencyMs),
+      latencyMs: Number(input.latencyMs.toFixed(1)),
+      latencyScope: 'browserInference',
+      landmarksCount: null,
+      faceCount: input.faceCount,
+      confidence: Number(input.confidence.toFixed(3)),
+      confidenceKind: 'faceBoxScore',
+      measuredAt: input.measuredAt ?? new Date().toISOString(),
+    },
+    false
+  );
+}
+
+export function buildDlibEventMetric(input: {
+  isDetected: boolean;
+  latencyMs: number;
+  confidence: number;
+  landmarksCount: number;
+  measuredAt?: string;
+}): EngineBenchmarkMetric {
+  return buildEngineMetric(
+    {
+      engineKey: 'dlib',
+      name: 'Dlib (68-Point Landmark)',
+      isDetected: input.isDetected,
+      fps: latencyToFps(input.latencyMs),
+      latencyMs: Number(input.latencyMs.toFixed(1)),
+      latencyScope: 'browserInference',
+      landmarksCount: input.landmarksCount,
+      faceCount: null,
+      confidence: Number(input.confidence.toFixed(3)),
+      confidenceKind: 'detectorScore',
+      measuredAt: input.measuredAt ?? new Date().toISOString(),
+    },
+    false
+  );
+}
+
+export function buildOpenFaceEventMetric(input: {
+  isDetected: boolean;
+  confidence: number | null;
+  clientRoundTripMs: number | null;
+  serverLatencyMs: number | null;
+  actionUnitCount?: number | null;
+  measuredAt?: string;
+}): EngineBenchmarkMetric {
+  const latencyMs = input.clientRoundTripMs ?? input.serverLatencyMs;
+  return buildEngineMetric(
+    {
+      engineKey: 'openface',
+      name: 'OpenFace 3.0 (remote)',
+      isDetected: input.isDetected,
+      fps: latencyToFps(input.serverLatencyMs ?? input.clientRoundTripMs),
+      latencyMs: latencyMs != null ? Number(latencyMs.toFixed(1)) : null,
+      latencyScope: input.serverLatencyMs != null ? 'serverInference' : 'networkRoundTrip',
+      landmarksCount: input.actionUnitCount ?? null,
+      faceCount: input.isDetected ? 1 : 0,
+      confidence: input.confidence != null ? Number(input.confidence.toFixed(3)) : null,
+      confidenceKind: 'retinaFaceScore',
+      measuredAt: input.measuredAt ?? new Date().toISOString(),
+      serverLatencyMs: input.serverLatencyMs,
+      resultAgeMs: 0,
+    },
+    false
+  );
+}
+
+/** Map OpenFace remote result → benchmark row fields (faces + AU count, not mesh landmarks). */
+export function openFaceBenchmarkFromDetection(input: {
+  isDetected: boolean;
+  confidence: number | null;
+  clientRoundTripMs: number | null;
+  serverLatencyMs: number | null;
+  resultTimestamp?: number | null;
+  actionUnits?: Record<string, unknown> | null;
+}): NonNullable<BuildBenchmarkInput['openface']> {
+  const actionUnitCount =
+    input.isDetected && input.actionUnits ? Object.keys(input.actionUnits).length : 0;
+
+  return {
+    isDetected: input.isDetected,
+    confidence: input.confidence,
+    clientRoundTripMs: input.clientRoundTripMs,
+    serverLatencyMs: input.serverLatencyMs,
+    resultTimestamp: input.resultTimestamp,
+    faceCount: input.isDetected ? 1 : 0,
+    actionUnitCount,
   };
 }
 
@@ -286,8 +398,6 @@ export function benchmarkMetricToDbBase(
     latencyMs: metric.latencyMs,
     landmarksCount: metric.landmarksCount,
     faceCount: metric.faceCount,
-    memoryMb: metric.memoryMb,
-    cpuLoadPct: metric.cpuLoadPct,
     confidence: metric.confidence,
     confidenceKind: metric.confidenceKind,
     latencyScope: metric.latencyScope,
@@ -321,19 +431,19 @@ export function formatComparableScore(score: number | null | undefined): string 
   return `${(score * 100).toFixed(1)}%`;
 }
 
-export function formatBenchmarkMemory(metric: EngineBenchmarkMetric): string {
-  if (metric.memoryMb == null) return '—';
-  return `${metric.memoryMb} MB JS heap (tab)`;
-}
-
 export function formatBenchmarkConfidence(metric: EngineBenchmarkMetric): string {
   if (metric.confidence == null) return '—';
   return `${(metric.confidence * 100).toFixed(1)}% (${CONFIDENCE_KIND_LABELS[metric.confidenceKind]})`;
 }
 
 export function formatLandmarksColumn(metric: EngineBenchmarkMetric): string {
-  if (metric.faceCount != null) return `${metric.faceCount} face(s)`;
-  if (metric.landmarksCount != null) return `${metric.landmarksCount} landmarks`;
+  const parts: string[] = [];
+  if (metric.faceCount != null) parts.push(`${metric.faceCount} face(s)`);
+  if (metric.landmarksCount != null && metric.landmarksCount > 0) {
+    const unit = metric.confidenceKind === 'retinaFaceScore' ? 'AU' : 'landmarks';
+    parts.push(`${metric.landmarksCount} ${unit}`);
+  }
+  if (parts.length > 0) return parts.join(' · ');
   if (metric.serverLatencyMs != null && !metric.frameSynced) {
     const age =
       metric.resultAgeMs != null ? ` · age ${Math.round(metric.resultAgeMs)}ms` : '';

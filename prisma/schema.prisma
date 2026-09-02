@@ -139,8 +139,6 @@ model MediaPipeLog {
   latencyMs      Float? // เวลาประมวลผลใน browser (ms)
   landmarksCount Int? // จำนวนจุด Landmarks (468)
   faceCount      Int?
-  memoryMb       Float? // JS heap ร่วมของ tab ตอน snapshot (ไม่ใช่ RSS ต่อ model)
-  cpuLoadPct     Float? // ไม่วัดใน browser — null
   confidence     Float? // tracking quality 0–1
   confidenceKind String?
   latencyScope   String?
@@ -168,8 +166,6 @@ model Yolov8Log {
   latencyMs      Float?
   landmarksCount Int?
   faceCount      Int?
-  memoryMb       Float?
-  cpuLoadPct     Float?
   confidence     Float?
   confidenceKind String?
   latencyScope   String?
@@ -197,8 +193,6 @@ model DlibLog {
   latencyMs      Float?
   landmarksCount Int?
   faceCount      Int?
-  memoryMb       Float?
-  cpuLoadPct     Float?
   confidence     Float?
   confidenceKind String?
   latencyScope   String?
@@ -226,8 +220,6 @@ model OpenFaceLog {
   latencyMs      Float? // client round-trip ms
   landmarksCount Int?
   faceCount      Int?
-  memoryMb       Float?
-  cpuLoadPct     Float?
   confidence     Float?
   confidenceKind String?
   latencyScope   String?
@@ -280,6 +272,7 @@ enum BehaviorScenario {
   OCCLUSION
   MULTIPLE_FACES
   LOW_LIGHT
+  DIM_LIGHT
   DISTANCE_1M
   EYES_CLOSED_DISENGAGED
   NATURAL_READING
@@ -352,7 +345,6 @@ model BehaviorFeatureLog {
   occlusionScore Float?
 
   // DEVICE & RUNTIME
-  deviceTier        String?
   trackingProfile   String?
   userAgent         String?
   /** true = row eligible for research export (valid, not warmup, tier/profile OK) */

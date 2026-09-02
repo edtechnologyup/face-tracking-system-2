@@ -21,6 +21,9 @@ export interface DeviceTierSpec {
   dlibIntervalMs: number;
   /** Min gap between L2CS ONNX runs in primary loop */
   l2csIntervalMs: number;
+  /** Low-frequency OpenFace remote loop (exam mode — does not block MediaPipe) */
+  enableOpenFaceBackgroundLoop: boolean;
+  openFaceIntervalMs: number;
   openFaceContinuousLoop: boolean;
   provenanceFullEveryN: number;
   /** Periodic /api/tracking/snapshot-analytics (extra L2CS server-side) */
@@ -51,7 +54,9 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     enableDlibInPrimaryLoop: false,
     dlibIntervalMs: 2000,
     l2csIntervalMs: 300,
-    openFaceContinuousLoop: false,
+    enableOpenFaceBackgroundLoop: true,
+    openFaceIntervalMs: 5000,
+    openFaceContinuousLoop: true,
     provenanceFullEveryN: 60,
     enableDeepAnalyticsSnapshots: false,
     overlayMode: 'full',
@@ -68,6 +73,8 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     enableDlibInPrimaryLoop: false,
     dlibIntervalMs: 2000,
     l2csIntervalMs: 400,
+    enableOpenFaceBackgroundLoop: true,
+    openFaceIntervalMs: 6000,
     openFaceContinuousLoop: false,
     provenanceFullEveryN: 60,
     enableDeepAnalyticsSnapshots: false,
@@ -85,6 +92,8 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     enableDlibInPrimaryLoop: false,
     dlibIntervalMs: 3000,
     l2csIntervalMs: 500,
+    enableOpenFaceBackgroundLoop: true,
+    openFaceIntervalMs: 8000,
     openFaceContinuousLoop: false,
     provenanceFullEveryN: 30,
     enableDeepAnalyticsSnapshots: false,
@@ -101,6 +110,9 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     enableDlibBackgroundLoop: true,
     enableDlibInPrimaryLoop: false,
     dlibIntervalMs: 4000,
+    l2csIntervalMs: 500,
+    enableOpenFaceBackgroundLoop: true,
+    openFaceIntervalMs: 10_000,
     openFaceContinuousLoop: false,
     provenanceFullEveryN: 30,
     enableDeepAnalyticsSnapshots: false,
@@ -198,11 +210,14 @@ export function buildTrackingRuntimeConfig(input?: {
   const profile = input?.profile ?? resolveTrackingProfile();
   const spec = TIER_SPECS[tier];
 
-  // Research on desktop may re-enable continuous OpenFace (still not recommended at scale).
+  // Research on desktop may re-enable fast OpenFace loop (~800ms).
   const openFaceContinuousLoop =
     profile === 'research' &&
     tier === 'T0' &&
     spec.openFaceContinuousLoop;
+
+  const enableOpenFaceBackgroundLoop =
+    spec.enableOpenFaceBackgroundLoop && !openFaceContinuousLoop;
 
   const overlayMode =
     profile === 'exam' && spec.overlayMode === 'full' ? 'contours' : spec.overlayMode;
@@ -221,6 +236,7 @@ export function buildTrackingRuntimeConfig(input?: {
     enableL2csInPrimaryLoop,
     yoloIntervalMs,
     openFaceContinuousLoop,
+    enableOpenFaceBackgroundLoop,
     enableDeepAnalyticsSnapshots: profile === 'research',
     sampleRateHz: Math.round(1000 / spec.sampleIntervalMs),
   };

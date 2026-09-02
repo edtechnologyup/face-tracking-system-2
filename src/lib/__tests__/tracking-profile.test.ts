@@ -65,6 +65,8 @@ describe('buildTrackingRuntimeConfig', () => {
       userAgent: 'desktop',
     });
     expect(cfg.openFaceContinuousLoop).toBe(false);
+    expect(cfg.enableOpenFaceBackgroundLoop).toBe(true);
+    expect(cfg.openFaceIntervalMs).toBe(5000);
     expect(cfg.sampleRateHz).toBe(2);
     expect(cfg.overlayMode).toBe('contours');
     expect(cfg.showEngineOverlays).toBe(true);

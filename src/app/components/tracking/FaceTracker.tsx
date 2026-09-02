@@ -7,12 +7,13 @@ import { DetectionStats } from './DetectionStats'
 import { ControlPanel } from './ControlPanel'
 import { useCamera } from '@/hooks/useCamera'
 import { BehaviorFeatureSync } from "./BehaviorFeatureSync"
+import { ModelEventLogSync } from './ModelEventLogSync'
+import type { ModelEventLogEnqueue } from '@/lib/model-event-log'
 import { useHybridFaceDetection } from '@/hooks/useHybridFaceDetection'
 import { buildTrackingRuntimeConfig } from '@/lib/tracking-profile'
 import {
   formatBenchmarkConfidence,
   formatBenchmarkFps,
-  formatBenchmarkMemory,
   formatLandmarksColumn,
   formatComparableInferenceMs,
   formatComparableScore,
@@ -62,6 +63,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [analyticsResult, setAnalyticsResult] = useState<AnalyticsResult | null>(null)
+  const modelEventLogEnqueueRef = useRef<ModelEventLogEnqueue | null>(null)
 
   // ใช้ Hybrid custom hooks
   const { initializeCamera, stopCamera } = useCamera()
@@ -94,6 +96,7 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
   } = useHybridFaceDetection({
     runtimeConfig: trackingConfigRef.current,
     lookingAwayThresholdMs: 3000,
+    modelEventLogEnqueueRef,
   })
 
   // Ref สำหรับเก็บ violations ล่าสุดเพื่อไม่ให้ callback re-trigger
@@ -259,6 +262,10 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     try {
       const token = localStorage.getItem('token')
       if (!token) {
+        if (isKeepAlive) {
+          console.warn('[session] skip end — no auth token')
+          return null
+        }
         throw new Error('ไม่พบ token การเข้าสู่ระบบ')
       }
 
@@ -275,16 +282,33 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         keepalive: isKeepAlive
       })
 
-      const result = await response.json()
+      const result = await response.json().catch(() => ({} as { error?: string }))
       
       if (!response.ok) {
-        throw new Error(result.error || 'ไม่สามารถอัปเดต session ได้')
+        const message = result.error || 'ไม่สามารถอัปเดต session ได้'
+        // Session may already be closed (double-stop, stale cleanup)
+        if (response.status === 404) {
+          console.warn('[session] already ended or not found:', sessionId)
+          return null
+        }
+        if (isKeepAlive) {
+          console.warn('[session] end failed', response.status, message)
+          return null
+        }
+        throw new Error(message)
       }
 
       console.log(`✅ อัปเดต tracking session สำเร็จ (${status}):`, result.data)
       return result.data
     } catch (error) {
-      console.error('❌ เกิดข้อผิดพลาดในการอัปเดต session:', error)
+      if (isKeepAlive) {
+        console.warn(
+          '⚠️ [session] end tracking failed:',
+          error instanceof Error ? error.message : error
+        )
+        return null
+      }
+      console.warn('❌ เกิดข้อผิดพลาดในการอัปเดต session:', error)
       setApiError(error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ')
       return null
     }
@@ -322,7 +346,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
       }
 
       startHybridTracking(videoRef)
-      
+
+      benchmarkSyncCounterRef.current = Math.max(0, benchmarkSyncEveryN - 1)
+
       setTimeout(() => {
         startRecording()
       }, 1000)
@@ -342,13 +368,24 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
     faceDetectionLossStats?: { lossCount: number; totalLossTime: number }, 
     faceDetectionLossEvents?: unknown[],
     isKeepAlive = false,
-    includeBenchmarkMetrics = true
+    includeBenchmarkMetrics = true,
+    /** When true, run same-frame 4-engine capture (needed for model_*_logs). */
+    runSyncedCapture = !isKeepAlive
   ) => {
     try {
       if (!isKeepAlive) setIsLoading(true)
       const token = localStorage.getItem('token')
       if (!token) {
+        if (isKeepAlive) {
+          console.warn('[orientation] skip save — no auth token')
+          return null
+        }
         throw new Error('ไม่พบ token การเข้าสู่ระบบ')
+      }
+
+      if (!stats) {
+        if (isKeepAlive) return null
+        throw new Error('ไม่มีข้อมูลสถิติ session')
       }
 
       // แปลงข้อมูล events ให้ตรงกับ API format (กรอง CENTER ออก)
@@ -374,16 +411,35 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         isActive: false
       }))
 
-      const currentBenchmark = includeBenchmarkMetrics
-        ? (videoRef.current
-            ? await captureSyncedBenchmark(videoRef.current)
-            : null) ?? getBenchmarkMetrics()
-        : null
+      let currentBenchmark: ReturnType<typeof getBenchmarkMetrics> = null
+      if (includeBenchmarkMetrics) {
+        const captured =
+          runSyncedCapture && videoRef.current
+            ? await captureSyncedBenchmark(videoRef.current).catch((err) => {
+                console.warn('[benchmark] synced capture failed during save:', err)
+                return null
+              })
+            : null
+        currentBenchmark =
+          captured ?? getComparableBenchmarkMetrics() ?? getBenchmarkMetrics()
 
-      if (includeBenchmarkMetrics && currentBenchmark && !currentBenchmark.snapshotSynced) {
-        console.warn(
-          '[benchmark] Skipping non-synced snapshot — deploy OpenFace server for 4-model comparison'
-        )
+        if (!currentBenchmark) {
+          console.warn('[benchmark] no metrics available for model_*_logs persist')
+        } else if (runSyncedCapture && !currentBenchmark.snapshotSynced) {
+          console.warn(
+            '[benchmark] partial snapshot — model_*_logs saved with snapshotSynced=false'
+          )
+        }
+      }
+
+      const payload = {
+        sessionId: sessionId,
+        events: orientationEvents,
+        sessionStats: stats as Record<string, unknown>,
+        faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
+        faceDetectionLossEvents: faceDetectionLossEvents || [],
+        securityViolations: violationsRef.current || [],
+        benchmarkMetrics: currentBenchmark || undefined,
       }
 
       const response = await fetch('/api/tracking/orientation', {
@@ -392,34 +448,52 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          sessionId: sessionId,
-          events: orientationEvents,
-          sessionStats: stats as Record<string, unknown>,
-          faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
-          faceDetectionLossEvents: faceDetectionLossEvents || [],
-          securityViolations: violationsRef.current || [],
-          benchmarkMetrics: currentBenchmark || undefined
-        }),
+        body: JSON.stringify(payload),
         keepalive: isKeepAlive
       })
 
       const result = await response.json()
       
       if (!response.ok) {
-        throw new Error(result.error || 'ไม่สามารถบันทึกข้อมูลได้')
+        const message = result.error || 'ไม่สามารถบันทึกข้อมูลได้'
+        if (isKeepAlive) {
+          console.warn('[orientation] auto-sync failed', response.status, message)
+          return null
+        }
+        throw new Error(message)
       }
 
       console.log('✅ บันทึกข้อมูล orientation สำเร็จ:', result.data)
+      if (result.data?.benchmarkPersist) {
+        const bp = result.data.benchmarkPersist as {
+          persisted?: boolean
+          enginesWritten?: number
+          skippedDuplicate?: boolean
+        }
+        if (bp.persisted) {
+          console.log(
+            `📊 model_*_logs: ${bp.enginesWritten ?? 0} engines saved`
+          )
+        } else if (bp.skippedDuplicate) {
+          console.log('📊 model_*_logs: skipped duplicate snapshot')
+        }
+      }
       return result.data
     } catch (error) {
+      if (isKeepAlive) {
+        console.warn(
+          '⚠️ [Auto-Sync] orientation save failed:',
+          error instanceof Error ? error.message : error
+        )
+        return null
+      }
       console.error('❌ เกิดข้อผิดพลาดในการบันทึกข้อมูล:', error)
       setApiError(error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ')
       return null
     } finally {
       if (!isKeepAlive) setIsLoading(false)
     }
-  }, [getBenchmarkMetrics, captureSyncedBenchmark])
+  }, [getBenchmarkMetrics, getComparableBenchmarkMetrics, captureSyncedBenchmark])
 
   // หยุดบันทึกและแสดงผลลัพธ์
   const handleStopRecording = useCallback(async () => {
@@ -563,14 +637,14 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           faceDetectionLoss: faceDetectionLossStats || { lossCount: 0, totalLossTime: 0 },
           faceDetectionLossEvents: faceDetectionLossEvents || [],
           securityViolations: violationsRef.current || [],
-          benchmarkMetrics: getComparableBenchmarkMetrics() || undefined
+          benchmarkMetrics: getComparableBenchmarkMetrics() ?? getBenchmarkMetrics() ?? undefined
         }),
         keepalive: isKeepAlive
-      }).catch(err => console.error('Auto-sync orientation error:', err))
+      }).catch(err => console.warn('Auto-sync orientation error:', err))
 
-      // 2. อัปเดตสถานะ session
+      // 2. อัปเดตสถานะ session (PUT = จบ session ที่มีอยู่)
       fetch('/api/tracking/sessions', {
-        method: 'POST',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
@@ -580,13 +654,13 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
           status: sessionStatus
         }),
         keepalive: isKeepAlive
-      }).catch(err => console.error('Auto-sync session status error:', err))
+      }).catch(err => console.warn('Auto-sync session status error:', err))
 
       if (sessionStatus !== 'IN_PROGRESS') {
         isSessionSavedRef.current = true
       }
     } catch (err) {
-      console.error('Flush session data error:', err)
+      console.warn('Flush session data error:', err)
     }
   }, [stopRecording, getCurrentStats, getFaceDetectionLossStats, getFaceDetectionLossEvents, getComparableBenchmarkMetrics])
 
@@ -608,12 +682,24 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
 
           if (stats) {
             benchmarkSyncCounterRef.current += 1
-            const includeBenchmark =
-              trackingConfigRef.current.profile === 'research' &&
+            const runSyncedCapture =
               benchmarkSyncCounterRef.current % benchmarkSyncEveryN === 0
-            saveOrientationData(sessionId, events, stats, faceLossStats, faceLossEvents, true, includeBenchmark)
-              .then(() => console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ'))
-              .catch(err => console.warn('⚠️ [Auto-Sync] ไม่สามารถซิงค์ข้อมูลได้:', err))
+            saveOrientationData(
+              sessionId,
+              events,
+              stats,
+              faceLossStats,
+              faceLossEvents,
+              true,
+              true,
+              runSyncedCapture
+            )
+              .then((data) => {
+                if (data) {
+                  console.log('🔄 [Auto-Sync] บันทึกข้อมูลการติดตามลงฐานข้อมูลแบบเรียลไทม์สำเร็จ')
+                }
+              })
+              .catch(() => undefined)
           }
         }
       }, ORIENTATION_SYNC_MS)
@@ -675,6 +761,12 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
         openFaceData={openFaceData}
         l2csGazeData={l2csGazeData}
       />
+      <ModelEventLogSync
+        isActive={isActive}
+        sessionId={currentSessionId}
+        getLatestDetection={getLatestDetection}
+        enqueueRef={modelEventLogEnqueueRef}
+      />
       <div className="p-6">
         {/* Video and Canvas Container with Live Face Count HUD Badge */}
         <div className="relative mb-6 rounded-2xl overflow-hidden shadow-lg border border-gray-200">
@@ -735,7 +827,9 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
               <span className="self-start sm:self-auto text-[11px] sm:text-xs bg-blue-50 text-blue-700 font-medium px-2.5 py-0.5 rounded-full border border-blue-200">
                 {benchmarkMetrics.snapshotSynced
                   ? `synced ${benchmarkMetrics.snapshotId.slice(0, 8)}… · 4 engines · same frame`
-                  : `live preview · รอ synced snapshot (ต้องมี OpenFace server)`}
+                  : openFaceData?.source === 'openface-server'
+                    ? `live preview · OpenFace server online`
+                    : `live preview · รอ OpenFace server (docker compose up openface)`}
               </span>
             </div>
 
@@ -749,7 +843,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Infer (เทียบได้)</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Score (0–1)</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Landmarks / Faces</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-700">JS Heap (tab)</th>
                     <th className="px-3 py-2 text-left font-semibold text-gray-700">Confidence (kind)</th>
                   </tr>
                 </thead>
@@ -766,7 +859,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.mediapipe.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-green-600">{formatComparableScore(benchmarkMetrics.mediapipe.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.mediapipe)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.mediapipe)}</td>
                     <td className="px-3 py-2 font-bold text-green-600">{formatBenchmarkConfidence(benchmarkMetrics.mediapipe)}</td>
                   </tr>
                   <tr className="bg-blue-50/20">
@@ -781,7 +873,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.yolov8.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-blue-600">{formatComparableScore(benchmarkMetrics.yolov8.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.yolov8)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.yolov8)}</td>
                     <td className="px-3 py-2 font-bold text-blue-600">{formatBenchmarkConfidence(benchmarkMetrics.yolov8)}</td>
                   </tr>
                   <tr className="bg-amber-50/20">
@@ -800,7 +891,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.dlib.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-amber-600">{formatComparableScore(benchmarkMetrics.dlib.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.dlib)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.dlib)}</td>
                     <td className="px-3 py-2 font-bold text-amber-600">{formatBenchmarkConfidence(benchmarkMetrics.dlib)}</td>
                   </tr>
                   <tr className="bg-purple-50/20">
@@ -811,6 +901,8 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2">
                       {benchmarkMetrics.openface.isDetected ? (
                         <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">DETECTING</span>
+                      ) : openFaceData?.source === 'openface-server' ? (
+                        <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded">STANDBY</span>
                       ) : (
                         <span className="bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded">OFFLINE</span>
                       )}
@@ -819,7 +911,6 @@ export function FaceTracker({ onTrackingStop, sessionName = 'การสอบ'
                     <td className="px-3 py-2 text-gray-700">{formatComparableInferenceMs(benchmarkMetrics.openface.inferenceLatencyMs)}</td>
                     <td className="px-3 py-2 font-bold text-purple-600">{formatComparableScore(benchmarkMetrics.openface.comparableDetectionScore)}</td>
                     <td className="px-3 py-2 text-gray-700">{formatLandmarksColumn(benchmarkMetrics.openface)}</td>
-                    <td className="px-3 py-2 text-gray-600">{formatBenchmarkMemory(benchmarkMetrics.openface)}</td>
                     <td className="px-3 py-2 font-bold text-purple-600">{formatBenchmarkConfidence(benchmarkMetrics.openface)}</td>
                   </tr>
                 </tbody>

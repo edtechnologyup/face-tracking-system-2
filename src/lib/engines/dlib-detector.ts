@@ -16,8 +16,6 @@ export interface DlibDetectionResult {
   detectionBox?: { x: number; y: number; width: number; height: number };
   latencyMs: number;
   fps: number;
-  memoryMb: number;
-  cpuLoadPct: number;
   timestamp: number;
 }
 
@@ -29,8 +27,6 @@ const emptyResult = (now: number): DlibDetectionResult => ({
   landmarkQuality: null,
   latencyMs: 0,
   fps: 0,
-  memoryMb: 0,
-  cpuLoadPct: 0,
   timestamp: now,
 });
 
@@ -98,8 +94,6 @@ export class Dlib68PointDetector {
         },
         latencyMs,
         fps: latencyMs > 0 ? Number((1000 / latencyMs).toFixed(1)) : 0,
-        memoryMb: 0,
-        cpuLoadPct: 0,
         timestamp: now,
       };
 

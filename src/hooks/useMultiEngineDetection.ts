@@ -11,8 +11,6 @@ export interface MultiEngineResults {
     fps: number;
     latencyMs: number;
     landmarksCount: number;
-    memoryMb: number;
-    cpuLoadPct: number;
   };
   yolov8: YOLOv8DetectionResult & { landmarksCount: number };
   dlib: DlibDetectionResult & { landmarksCount: number };
@@ -35,9 +33,9 @@ export function useMultiEngineDetection() {
   const mpFps = useRef(60)
 
   const [results, setResults] = useState<MultiEngineResults>({
-    mediapipe: { data: null, fps: 0, latencyMs: 0, landmarksCount: 468, memoryMb: 38.5, cpuLoadPct: 30 },
-    yolov8: { isDetected: false, confidence: 0, latencyMs: 0, fps: 0, landmarksCount: 5, memoryMb: 48, cpuLoadPct: 25 },
-    dlib: { isDetected: false, landmarks68: [], confidence: 0, detectionScore: 0, landmarkQuality: null, latencyMs: 0, fps: 0, landmarksCount: 68, memoryMb: 92, cpuLoadPct: 140, timestamp: 0 },
+    mediapipe: { data: null, fps: 0, latencyMs: 0, landmarksCount: 468 },
+    yolov8: { isDetected: false, confidence: 0, latencyMs: 0, fps: 0, landmarksCount: 0 },
+    dlib: { isDetected: false, landmarks68: [], confidence: 0, detectionScore: 0, landmarkQuality: null, latencyMs: 0, fps: 0, landmarksCount: 68, timestamp: 0 },
     openface: {
       isDetected: false,
       actionUnits: null,
@@ -47,8 +45,6 @@ export function useMultiEngineDetection() {
       latencyMs: 0,
       fps: 0,
       landmarksCount: 0,
-      memoryMb: 0,
-      cpuLoadPct: 0
     }
   })
 
@@ -109,7 +105,7 @@ export function useMultiEngineDetection() {
     // 2. YOLOv8-Face ONNX (lindevs single-class)
     const yoloRes = yolov8Ref.current
       ? await yolov8Ref.current.detectMultiFace(video)
-      : { isDetected: false, confidence: 0, latencyMs: 0, fps: 0, memoryMb: 0, cpuLoadPct: 0, faceCount: 0, hasMultipleFaces: false, boxes: [], timestamp: Date.now() }
+      : { isDetected: false, confidence: 0, latencyMs: 0, fps: 0, faceCount: 0, hasMultipleFaces: false, boxes: [], timestamp: Date.now() }
 
     // 3. Dlib 68-Point (face-api landmark68Net)
     const dlibRes = dlibRef.current
@@ -122,8 +118,6 @@ export function useMultiEngineDetection() {
           landmarkQuality: null,
           latencyMs: 0,
           fps: 0,
-          memoryMb: 0,
-          cpuLoadPct: 0,
           timestamp: Date.now(),
         }
 
@@ -138,8 +132,6 @@ export function useMultiEngineDetection() {
           confidence: null,
           latencyMs: 0,
           fps: 0,
-          memoryMb: 0,
-          cpuLoadPct: 0,
         }
 
     const mpDerivedFps = mpLatency > 0 ? Number((1000 / mpLatency).toFixed(1)) : 0
@@ -150,8 +142,6 @@ export function useMultiEngineDetection() {
         fps: mpDerivedFps,
         latencyMs: Number(mpLatency.toFixed(1)),
         landmarksCount: mpData?.landmarks?.length || 468,
-        memoryMb: 0,
-        cpuLoadPct: 0
       },
       yolov8: {
         ...yoloRes,

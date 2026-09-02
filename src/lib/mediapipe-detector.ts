@@ -4,6 +4,8 @@ import { estimateGazeFromLandmarks, type IrisGazeEstimate } from './gaze-estimat
 import { mapBlendshapesToActionUnits, type MappedActionUnits, type BlendshapeCategory } from './blendshape-action-units';
 import { computeLandmarkConfidence, computeMediapipeFrameConfidence, computeHeadPoseConfidence } from './mediapipe-quality';
 import { extractHeadPoseFromMatrix } from './mediapipe-head-pose';
+import { analyzeImageQuality } from './image-quality';
+import { evaluateCbmiValidity } from './cbmi-validity';
 
 // ซ่อน TensorFlow Lite INFO messages
 const originalConsoleLog = console.log;
@@ -47,22 +49,43 @@ console.error = (...args) => {
 };
 
 // CBMI Research Parameter Thresholds (from cbmi-parameter-guide.html)
-export const YAW_THRESHOLD = 20; // 1. Raised from 15 to 20 to eliminate circularity and filter borderline tilts
-export const PITCH_UP_THRESHOLD = 14.0;
-export const PITCH_DOWN_THRESHOLD = 12.0;
-export const HYSTERESIS_MARGIN = 5.0; // 2. Increased from 2 to 5 to prevent bouncing at threshold boundary
-export const DISTANCE_THRESHOLD_CM = 70; // 5. Tightened from 80 to 70 for reliable pose estimation
-export const BRIGHTNESS_MIN_THRESHOLD = 0.20; // 6. Flag degraded lighting condition when brightnessMean < 0.20
-export const SUSTAINED_DURATION_SEC = 2; // 4. Filter out transient micro-movements (< 2s) before database logging
-export const EAR_THRESHOLD = 0.10; // 3. Lowered from 0.25 to 0.10 to prevent normal blinks being flagged
-export const HEAD_PITCH_DISENGAGEMENT_THRESHOLD = 10; // 3. Must be pitch > 10 alongside EAR < 0.10 for disengagement
-export const OCCLUSION_VALID_THRESHOLD = 0.5; // phase/isValid: face partially occluded above this
-export const OCCLUSION_SCENARIO_THRESHOLD = 0.8; // scenario label OCCLUSION above this
+import {
+  YAW_THRESHOLD,
+  PITCH_UP_THRESHOLD,
+  PITCH_DOWN_THRESHOLD,
+  HYSTERESIS_MARGIN,
+  DISTANCE_THRESHOLD_CM,
+  BRIGHTNESS_MIN_THRESHOLD,
+  SUSTAINED_DURATION_SEC,
+  EAR_THRESHOLD,
+  HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
+} from './cbmi-parameters';
+
+export {
+  YAW_THRESHOLD,
+  PITCH_UP_THRESHOLD,
+  PITCH_DOWN_THRESHOLD,
+  HYSTERESIS_MARGIN,
+  DISTANCE_THRESHOLD_CM,
+  BRIGHTNESS_MIN_THRESHOLD,
+  BRIGHTNESS_DIM_LIGHT_THRESHOLD,
+  CONTRAST_MIN_THRESHOLD,
+  SHARPNESS_MIN_THRESHOLD,
+  SUSTAINED_DURATION_SEC,
+  EAR_THRESHOLD,
+  HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
+  GAZE_YAW_THRESHOLD,
+  GAZE_PITCH_DOWN_THRESHOLD,
+  GAZE_PITCH_UP_THRESHOLD,
+  GAZE_MIN_CONFIDENCE,
+  OCCLUSION_VALID_THRESHOLD,
+  OCCLUSION_SCENARIO_THRESHOLD,
+} from './cbmi-parameters';
 
 export interface FaceTrackingData {
   isDetected: boolean;
-  isValid?: boolean; // Frame quality check (brightness >= 0.20, distance <= 70cm, single face)
-  invalidReason?: string; // Reason why frame is not valid (e.g., 'LOW_BRIGHTNESS', 'FACE_TOO_FAR')
+  isValid?: boolean; // CBMI validity envelope (brightness/contrast/sharpness/distance/single face)
+  invalidReason?: string; // e.g. LOW_BRIGHTNESS, LOW_CONTRAST, LOW_SHARPNESS, FACE_TOO_FAR
   orientation: {
     yaw: number;
     pitch: number;
@@ -96,7 +119,12 @@ export interface FaceTrackingData {
   };
   quality?: {
     brightnessMean: number;
+    contrastScore: number;
+    sharpnessScore: number;
     isLowBrightness: boolean;
+    isDimLight?: boolean;
+    isLowContrast?: boolean;
+    isLowSharpness?: boolean;
   };
   gaze?: IrisGazeEstimate;
   actionUnits?: MappedActionUnits | null;
@@ -201,7 +229,7 @@ export class MediaPipeDetector {
   private lastDetection: FaceTrackingData | null = null;
   private performanceMode: MediaPipePerformanceMode;
   private lastBrightnessCheckMs = 0;
-  private cachedBrightness = 0.5;
+  private cachedQuality = { brightnessMean: 0.5, contrastScore: 0.5, sharpnessScore: 0.5 };
   private readonly BRIGHTNESS_CHECK_INTERVAL_MS = 2000;
 
   constructor(options?: MediaPipeDetectorOptions) {
@@ -368,8 +396,12 @@ export class MediaPipeDetector {
         // บันทึก face detection loss
         this.handleFaceDetectionLoss();
         
-        const brightnessMean = this.getBrightness(video);
-        const isLowBrightness = brightnessMean < this.BRIGHTNESS_MIN_THRESHOLD;
+        const qualityScores = this.getImageQuality(video);
+        const validity = evaluateCbmiValidity({
+          ...qualityScores,
+          hasFace: false,
+          qualityReady: true,
+        });
 
         // หากก่อนหน้านี้กำลังก้มหน้าอยู่ (DOWN) แล้วแลนด์มาร์คหลุดชั่วคราวจากการก้มลึก ให้คงสถานะ DOWN ไว้ช่วงสั้นๆ (กรอบ 1-10)
         const isDeepBowingLoss = (this.currentDirection === 'DOWN' || this.smoothedPitch < -10.0) && this.consecutiveLossFrames <= 10;
@@ -379,8 +411,8 @@ export class MediaPipeDetector {
           
           const deepBowingData: FaceTrackingData = {
             isDetected: true,
-            isValid: !isLowBrightness,
-            invalidReason: isLowBrightness ? 'LOW_BRIGHTNESS' : undefined,
+            isValid: validity.isValid,
+            invalidReason: validity.invalidReason ?? undefined,
             orientation: { 
               yaw: this.smoothedYaw, 
               pitch: Math.min(this.smoothedPitch, -20.0), 
@@ -394,8 +426,13 @@ export class MediaPipeDetector {
               isSecurityRisk: false
             },
             quality: {
-              brightnessMean,
-              isLowBrightness
+              brightnessMean: qualityScores.brightnessMean,
+              contrastScore: qualityScores.contrastScore,
+              sharpnessScore: qualityScores.sharpnessScore,
+              isLowBrightness: validity.isLowBrightness,
+              isDimLight: validity.isDimLight,
+              isLowContrast: validity.isLowContrast,
+              isLowSharpness: validity.isLowSharpness,
             }
           };
           
@@ -411,7 +448,7 @@ export class MediaPipeDetector {
         const noFaceData: FaceTrackingData = {
           isDetected: false,
           isValid: false,
-          invalidReason: isLowBrightness ? 'LOW_BRIGHTNESS' : 'NO_FACE_DETECTED',
+          invalidReason: validity.invalidReason ?? 'NO_FACE_DETECTED',
           orientation: { yaw: 0, pitch: 0, isLookingAway: false },
           confidence: 0,
           realTime: new Date().toLocaleTimeString('th-TH', { hour12: false }),
@@ -420,8 +457,13 @@ export class MediaPipeDetector {
             isSecurityRisk: false
           },
           quality: {
-            brightnessMean,
-            isLowBrightness
+            brightnessMean: qualityScores.brightnessMean,
+            contrastScore: qualityScores.contrastScore,
+            sharpnessScore: qualityScores.sharpnessScore,
+            isLowBrightness: validity.isLowBrightness,
+            isDimLight: validity.isDimLight,
+            isLowContrast: validity.isLowContrast,
+            isLowSharpness: validity.isLowSharpness,
           }
         };
         
@@ -535,28 +577,33 @@ export class MediaPipeDetector {
       trackingData.multipleFaces = multipleFacesData;
       trackingData.allFaceLandmarks = results.faceLandmarks;
       
-      // CBMI Guide Validity Checks: Brightness, Distance, Multiple Faces
-      const brightnessMean = this.getBrightness(video);
-      const isLowBrightness = brightnessMean < this.BRIGHTNESS_MIN_THRESHOLD;
-      const isTooFar = !!trackingData.distance?.isTooFar;
-      const hasMultipleFaces = !!multipleFacesData.isSecurityRisk;
-      
+      // CBMI Guide Validity Checks: brightness, contrast, sharpness, distance, multiple faces
+      const qualityScores = this.getImageQuality(video, landmarks);
+      const validity = evaluateCbmiValidity({
+        ...qualityScores,
+        hasFace: true,
+        faceCount,
+        faceDistanceCm: trackingData.distance?.estimatedCm,
+        isTooFar: trackingData.distance?.isTooFar,
+        qualityReady: true,
+      });
+
       trackingData.quality = {
-        brightnessMean,
-        isLowBrightness
+        brightnessMean: qualityScores.brightnessMean,
+        contrastScore: qualityScores.contrastScore,
+        sharpnessScore: qualityScores.sharpnessScore,
+        isLowBrightness: validity.isLowBrightness,
+        isDimLight: validity.isDimLight,
+        isLowContrast: validity.isLowContrast,
+        isLowSharpness: validity.isLowSharpness,
       };
 
-      if (isLowBrightness) {
-        trackingData.isValid = false;
-        trackingData.invalidReason = 'LOW_BRIGHTNESS';
-      } else if (isTooFar) {
-        trackingData.isValid = false;
-        trackingData.invalidReason = 'FACE_TOO_FAR';
-      } else if (hasMultipleFaces) {
+      if (multipleFacesData.isSecurityRisk) {
         trackingData.isValid = false;
         trackingData.invalidReason = 'MULTIPLE_FACES_DETECTED';
       } else {
-        trackingData.isValid = true;
+        trackingData.isValid = validity.isValid;
+        trackingData.invalidReason = validity.invalidReason ?? undefined;
       }
       
       this.lastDetection = trackingData;
@@ -586,15 +633,36 @@ export class MediaPipeDetector {
     console.log('🔄 Re-calibrating face neutral baseline position...');
   }
 
-  /** Throttled brightness — avoids canvas read every detection frame */
-  private getBrightness(video: HTMLVideoElement): number {
+  /** Throttled image quality — avoids canvas read every detection frame */
+  private getImageQuality(
+    video: HTMLVideoElement,
+    landmarks?: NormalizedLandmark[]
+  ): { brightnessMean: number; contrastScore: number; sharpnessScore: number } {
     const now = performance.now();
     if (now - this.lastBrightnessCheckMs < this.BRIGHTNESS_CHECK_INTERVAL_MS) {
-      return this.cachedBrightness;
+      return this.cachedQuality;
     }
     this.lastBrightnessCheckMs = now;
-    this.cachedBrightness = this.calculateBrightness(video);
-    return this.cachedBrightness;
+
+    let bbox: { x: number; y: number; width: number; height: number } | null = null;
+    if (landmarks?.length && video.videoWidth > 0) {
+      const xs = landmarks.map((l) => l.x * video.videoWidth);
+      const ys = landmarks.map((l) => l.y * video.videoHeight);
+      bbox = {
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        width: Math.max(...xs) - Math.min(...xs),
+        height: Math.max(...ys) - Math.min(...ys),
+      };
+    }
+
+    this.cachedQuality = analyzeImageQuality(video, bbox);
+    return this.cachedQuality;
+  }
+
+  /** @deprecated use getImageQuality — kept for internal brightness-only callers */
+  private getBrightness(video: HTMLVideoElement): number {
+    return this.getImageQuality(video).brightnessMean;
   }
 
   /**
@@ -858,24 +926,16 @@ export class MediaPipeDetector {
     const rightTop = landmarks[386] || rightPupil;
     const rightBottom = landmarks[374] || rightPupil;
 
-    const leftEyeHeight = Math.abs(leftBottom.y - leftTop.y) || 0.02;
-    const rightEyeHeight = Math.abs(rightBottom.y - rightTop.y) || 0.02;
-
     const leftEyeCenterY = (leftTop.y + leftBottom.y) / 2;
     const rightEyeCenterY = (rightTop.y + rightBottom.y) / 2;
 
-    const leftPupilOffsetY = (leftEyeCenterY - leftPupil.y) / leftEyeHeight;
-    const rightPupilOffsetY = (rightEyeCenterY - rightPupil.y) / rightEyeHeight;
-    const irisGazeRelY = (leftPupilOffsetY + rightPupilOffsetY) / 2;
-    const irisGazePitchDegrees = irisGazeRelY * 25;
-
-    // Raw Pitch ก่อนการ Calibrate (ปรับสมดุลความไว และชดเชย offset จาก +6.0 เหลือ +1.5°)
+    // Head pitch only — ไม่รวม iris gaze (มองจอสอบด้านล่างกล้องไม่ใช่ "ก้มหน้า")
     const pitchScale = pitchDeviation > 0 ? 80 : 75;
-    const rawPitch = (pitchDeviation * pitchScale) + irisGazePitchDegrees + 1.5; 
+    const headPitchRaw = (pitchDeviation * pitchScale) + 1.5;
 
     // Trimmed-Mean Auto-calibration: เก็บ 30 samples แรกและกรองข้อมูลสุดโต่ง 15% (Outlier Trimming)
     if (!this.calibrationComplete) {
-      this.calibrationPitchSamples.push(rawPitch);
+      this.calibrationPitchSamples.push(headPitchRaw);
       this.calibrationYawSamples.push(headYawDegrees);
       
       if (this.calibrationPitchSamples.length >= 30) {
@@ -898,7 +958,7 @@ export class MediaPipeDetector {
 
     // คำนวณ Yaw/Pitch สัมพัทธ์กับตำแหน่ง neutral baseline เฉพาะตัวของผู้ใช้
     const adjustedYaw = yaw - this.neutralYawBaseline;
-    let currentPitch = (rawPitch - this.neutralPitchBaseline) + pitchYawCompensation;
+    let currentPitch = (headPitchRaw - this.neutralPitchBaseline) + pitchYawCompensation;
 
     // ชดเชยการเงยหน้ามุมสูงมากๆ (Extreme Upward Pitch Detection Boost)
     const eyeNoseDistanceY = noseTip.y - ((leftEyeCenterY + rightEyeCenterY) / 2);
@@ -1136,6 +1196,11 @@ export class MediaPipeDetector {
     });
     this.orientationHistory = [];
     this.currentOrientationEvent = null;
+    this.currentDirection = 'CENTER';
+    this.lastSentDirection = '';
+
+    // ปรับ baseline ใหม่เมื่อเริ่ม session — ผู้สอบควรมองตรงกล้อง ~3 วินาทีแรก
+    this.recalibrate();
     
     // Reset face detection loss statistics เมื่อเริ่ม session ใหม่
     this.resetFaceDetectionLossStats();

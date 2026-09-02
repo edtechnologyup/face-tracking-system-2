@@ -23,6 +23,8 @@ describe('buildMultiEngineBenchmark', () => {
         clientRoundTripMs: 320,
         serverLatencyMs: 180,
         resultTimestamp: 10_000,
+        faceCount: 1,
+        actionUnitCount: 14,
       },
       now: 10_500,
       snapshotSynced: true,
@@ -36,8 +38,9 @@ describe('buildMultiEngineBenchmark', () => {
     expect(snapshot.yolov8.faceCount).toBe(1);
     expect(snapshot.openface.inferenceLatencyMs).toBe(180);
     expect(snapshot.openface.latencyScope).toBe('serverInference');
+    expect(snapshot.openface.faceCount).toBe(1);
+    expect(snapshot.openface.landmarksCount).toBe(14);
     expect(snapshot.openface.resultAgeMs).toBe(0);
-    expect(snapshot.openface.cpuLoadPct).toBeNull();
     expect(snapshot.snapshotSynced).toBe(true);
     expect(snapshot.enginesCaptured).toBe(4);
     expect(snapshot.snapshotId).toBeTruthy();

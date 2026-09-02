@@ -33,7 +33,6 @@ function buildMockLog(sampleIndex: number) {
     faceConfidence: 0.92,
     isValid: true,
     pipelineVersion: 'hybrid-4.1-tracking-profile',
-    deviceTier: 'T0',
     trackingProfile: 'exam',
     researchEligible: true,
     sampleRateHz: 2,

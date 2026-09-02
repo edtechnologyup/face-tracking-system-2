@@ -28,8 +28,6 @@ export interface OpenFaceDetectionResult {
   confidence: number | null;
   latencyMs: number;
   fps: number;
-  memoryMb: number;
-  cpuLoadPct: number;
   source?: OpenFaceSource;
   timestamp?: number;
   serverLatencyMs?: number;
@@ -45,8 +43,6 @@ const emptyResult = (): OpenFaceDetectionResult => ({
   confidence: null,
   latencyMs: 0,
   fps: 0,
-  memoryMb: 0,
-  cpuLoadPct: 0,
   source: 'ui-passthrough',
 });
 
@@ -113,8 +109,6 @@ export class OpenFaceDetector {
       confidence: null,
       latencyMs,
       fps: latencyMs > 0 ? Number((1000 / latencyMs).toFixed(1)) : 0,
-      memoryMb: 0,
-      cpuLoadPct: Number(((latencyMs / 16.6) * 100).toFixed(1)),
       source: 'ui-passthrough',
     };
   }

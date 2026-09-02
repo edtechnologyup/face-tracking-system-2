@@ -402,19 +402,19 @@ export function EngineComparison() {
                 <td className="px-4 py-3 font-semibold text-gray-900">การใช้ทรัพยากร (RAM & CPU)</td>
                 <td className="px-4 py-3 text-green-700 bg-green-50/30">
                   <div className="font-bold">ต่ำมาก (Client Edge)</div>
-                  <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.mediapipe.memoryMb} MB</b> | CPU: <b>{results.mediapipe.cpuLoadPct}%</b></div>
+                  <div className="text-xs text-gray-600 mt-0.5">รันใน browser — ไม่วัด RAM/CPU ต่อโมเดล</div>
                 </td>
                 <td className="px-4 py-3 text-blue-700 bg-blue-50/30">
                   <div className="font-bold">ต่ำ-ปานกลาง (ONNX)</div>
-                  <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.yolov8.memoryMb} MB</b> | CPU: <b>{results.yolov8.cpuLoadPct}%</b></div>
+                  <div className="text-xs text-gray-600 mt-0.5">รันใน browser — ไม่วัด RAM/CPU ต่อโมเดล</div>
                 </td>
                 <td className="px-4 py-3 text-amber-700 bg-amber-50/30">
                   <div className="font-bold">ปานกลาง (CPU-bound)</div>
-                  <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.dlib.memoryMb} MB</b> | CPU: <b>{results.dlib.cpuLoadPct}%</b></div>
+                  <div className="text-xs text-gray-600 mt-0.5">รันใน browser — ไม่วัด RAM/CPU ต่อโมเดล</div>
                 </td>
                 <td className="px-4 py-3 text-purple-700 bg-purple-50/30">
                   <div className="font-bold">สูงมาก (Server/GPU)</div>
-                  <div className="text-xs text-gray-600 mt-0.5">RAM: <b>{results.openface.memoryMb} MB</b> | CPU: <b>{results.openface.cpuLoadPct}%</b></div>
+                  <div className="text-xs text-gray-600 mt-0.5">รันบน OpenFace server</div>
                 </td>
               </tr>
               <tr>

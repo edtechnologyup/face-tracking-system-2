@@ -3,6 +3,9 @@ import {
   PITCH_UP_THRESHOLD,
   PITCH_DOWN_THRESHOLD,
   BRIGHTNESS_MIN_THRESHOLD,
+  BRIGHTNESS_DIM_LIGHT_THRESHOLD,
+  CONTRAST_MIN_THRESHOLD,
+  SHARPNESS_MIN_THRESHOLD,
   OCCLUSION_VALID_THRESHOLD,
   OCCLUSION_SCENARIO_THRESHOLD,
   SUSTAINED_DURATION_SEC,
@@ -10,6 +13,10 @@ import {
   EAR_THRESHOLD,
   HEAD_PITCH_DISENGAGEMENT_THRESHOLD,
 } from '@/lib/mediapipe-detector';
+import {
+  evaluateCbmiValidity,
+  resolveEffectiveAttentionDirection,
+} from '@/lib/cbmi-validity';
 import {
   updateNaturalReading,
   type NaturalReadingState,
@@ -28,6 +35,7 @@ export type BehaviorScenarioLabel =
   | 'OCCLUSION'
   | 'MULTIPLE_FACES'
   | 'LOW_LIGHT'
+  | 'DIM_LIGHT'
   | 'DISTANCE_1M'
   | 'EYES_CLOSED_DISENGAGED'
   | 'NATURAL_READING';
@@ -49,6 +57,8 @@ export interface RuleLabelInput {
   pitch: number;
   occlusionScore: number;
   brightnessMean: number;
+  contrastScore?: number;
+  sharpnessScore?: number;
   faceDistanceCm: number | null;
   isTooFar?: boolean;
   leftEAR?: number | null;
@@ -57,6 +67,9 @@ export interface RuleLabelInput {
   rightEyeOpenness?: number | null;
   headRoll?: number | null;
   headPitch?: number | null;
+  gazeYaw?: number | null;
+  gazePitch?: number | null;
+  gazeConfidence?: number | null;
   qualityReady: boolean;
   hasGaze: boolean;
   landmarkCount?: number;
@@ -106,18 +119,32 @@ export function labelBehaviorFromFeatures(input: RuleLabelInput): RuleLabelResul
     pitch,
     occlusionScore,
     brightnessMean,
+    contrastScore = 0.5,
+    sharpnessScore = 0.5,
     faceDistanceCm,
     isTooFar,
     leftEAR,
     rightEAR,
     headPitch,
+    gazeYaw,
+    gazePitch,
+    gazeConfidence,
     qualityReady,
     hasGaze,
     attentionState: prevAttention,
     naturalReadingState: prevReading,
   } = input;
 
-  const direction = resolveDirection(yaw, pitch);
+  const headDirection = resolveDirection(yaw, pitch);
+  const direction = resolveEffectiveAttentionDirection({
+    headYaw: yaw,
+    headPitch: pitch,
+    headDirection,
+    hasGaze,
+    gazeYaw,
+    gazePitch,
+    gazeConfidence,
+  });
   const attentionState = updateAttentionState(prevAttention, direction, now);
   const durationLookingMs = now - attentionState.startTime;
 
@@ -141,6 +168,8 @@ export function labelBehaviorFromFeatures(input: RuleLabelInput): RuleLabelResul
     scenario = 'OCCLUSION';
   } else if (brightnessMean < BRIGHTNESS_MIN_THRESHOLD) {
     scenario = 'LOW_LIGHT';
+  } else if (brightnessMean < BRIGHTNESS_DIM_LIGHT_THRESHOLD) {
+    scenario = 'DIM_LIGHT';
   } else if (
     (faceDistanceCm != null && faceDistanceCm > DISTANCE_THRESHOLD_CM) ||
     isTooFar
@@ -202,9 +231,25 @@ export function labelBehaviorFromFeatures(input: RuleLabelInput): RuleLabelResul
     hasFace &&
     faceCount <= 1 &&
     occlusionScore < OCCLUSION_VALID_THRESHOLD &&
-    brightnessMean >= BRIGHTNESS_MIN_THRESHOLD;
+    brightnessMean >= BRIGHTNESS_MIN_THRESHOLD &&
+    contrastScore >= CONTRAST_MIN_THRESHOLD &&
+    sharpnessScore >= SHARPNESS_MIN_THRESHOLD &&
+    !(faceDistanceCm != null && faceDistanceCm > DISTANCE_THRESHOLD_CM) &&
+    !isTooFar;
 
   let invalidReason: string | null = null;
+  const cbmiValidity = evaluateCbmiValidity({
+    brightnessMean,
+    contrastScore,
+    sharpnessScore,
+    hasFace,
+    faceCount,
+    faceDistanceCm,
+    isTooFar,
+    occlusionScore,
+    qualityReady,
+  });
+
   if (!qualityReady) {
     isValid = false;
     invalidReason = 'WARMUP';
@@ -217,9 +262,9 @@ export function labelBehaviorFromFeatures(input: RuleLabelInput): RuleLabelResul
   } else if (occlusionScore >= OCCLUSION_VALID_THRESHOLD) {
     isValid = false;
     invalidReason = 'FACE_OCCLUDED';
-  } else if (brightnessMean < BRIGHTNESS_MIN_THRESHOLD) {
+  } else if (!cbmiValidity.isValid) {
     isValid = false;
-    invalidReason = 'LOW_BRIGHTNESS';
+    invalidReason = cbmiValidity.invalidReason;
   } else if (scenario === 'EYES_CLOSED_DISENGAGED') {
     isValid = false;
     invalidReason = 'EYES_CLOSED_DISENGAGED';
@@ -269,6 +314,8 @@ export function scenarioToViolationType(
       return 'FACE_OCCLUDED';
     case 'LOW_LIGHT':
       return 'LOW_LIGHT';
+    case 'DIM_LIGHT':
+      return 'DIM_LIGHT';
     case 'DISTANCE_1M':
       return 'FACE_TOO_FAR';
     default:

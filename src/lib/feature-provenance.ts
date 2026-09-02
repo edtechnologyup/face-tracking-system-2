@@ -107,6 +107,8 @@ export function buildBehaviorFeatureProvenance(input: {
   yoloPrimaryConfidence: number | null;
   yoloPrimaryBoxNormalized: YoloProvenanceEngine['primaryBoxNormalized'];
   mediapipeBlendshapes: boolean;
+  leftEarForOpenness?: boolean;
+  rightEarForOpenness?: boolean;
   faceCountSource: 'yolo' | 'mediapipe' | 'fallback';
   dlibStaleMs: number | null;
   dlibDetected: boolean;
@@ -248,13 +250,29 @@ export function buildBehaviorFeatureProvenance(input: {
     },
     leftEyeOpenness: {
       engine: 'MediaPipe FaceLandmarker',
-      level: input.mediapipeBlendshapes ? 'L0' : 'NULL',
-      method: '1-eyeBlinkLeft',
+      level: input.mediapipeBlendshapes
+        ? 'L0'
+        : input.leftEarForOpenness
+          ? 'L2'
+          : 'NULL',
+      method: input.mediapipeBlendshapes
+        ? '1-eyeBlinkLeft'
+        : input.leftEarForOpenness
+          ? 'landmarkEAR-derivedOpenness'
+          : 'none',
     },
     rightEyeOpenness: {
       engine: 'MediaPipe FaceLandmarker',
-      level: input.mediapipeBlendshapes ? 'L0' : 'NULL',
-      method: '1-eyeBlinkRight',
+      level: input.mediapipeBlendshapes
+        ? 'L0'
+        : input.rightEarForOpenness
+          ? 'L2'
+          : 'NULL',
+      method: input.mediapipeBlendshapes
+        ? '1-eyeBlinkRight'
+        : input.rightEarForOpenness
+          ? 'landmarkEAR-derivedOpenness'
+          : 'none',
     },
     leftEAR: { engine: 'derived', level: 'L2', method: 'mediaPipeLandmarkEAR' },
     rightEAR: { engine: 'derived', level: 'L2', method: 'mediaPipeLandmarkEAR' },

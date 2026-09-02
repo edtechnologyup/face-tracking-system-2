@@ -51,7 +51,7 @@ def health_ready() -> HealthResponse:
 
 
 @app.post("/v1/analyze")
-def analyze(body: AnalyzeRequest, _: None = Depends(verify_api_key)):
+async def analyze(body: AnalyzeRequest, _: None = Depends(verify_api_key)):
     raw = body.imageBase64.strip()
     if raw.startswith("data:"):
         raw = raw.split(",", 1)[-1]

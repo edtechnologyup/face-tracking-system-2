@@ -219,15 +219,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // บันทึกลงตารางโมเดลแยกแต่ละตัว — เฉพาะ synced snapshot (4 engine, frame เดียวกัน)
+    // บันทึกลงตารางโมเดลแยกแต่ละตัว (snapshotSynced=true = 4 engine same frame)
+    let benchmarkPersist: {
+      persisted: boolean
+      skippedDuplicate: boolean
+      enginesWritten: number
+      snapshotId: string | null
+    } | null = null
     if (benchmarkMetrics) {
-      const persistResult = await persistSyncedBenchmarkLogs(sessionId, benchmarkMetrics)
-      if (!persistResult.persisted && !persistResult.skippedDuplicate) {
+      try {
+        const persistResult = await persistSyncedBenchmarkLogs(sessionId, benchmarkMetrics)
+        benchmarkPersist = {
+          persisted: persistResult.persisted,
+          skippedDuplicate: persistResult.skippedDuplicate,
+          enginesWritten: persistResult.enginesWritten,
+          snapshotId: persistResult.snapshotId,
+        }
+        if (persistResult.persisted) {
+          console.log(
+            `[orientation] model logs saved: ${persistResult.enginesWritten} engines, snapshot=${persistResult.snapshotId}, synced=${benchmarkMetrics.snapshotSynced === true}`
+          )
+        } else if (persistResult.skippedDuplicate) {
+          console.log('[orientation] skipped duplicate benchmarkSnapshotId', persistResult.snapshotId)
+        } else if (!benchmarkMetrics.snapshotId) {
+          console.warn('[orientation] model logs skipped: missing snapshotId')
+        }
+      } catch (benchmarkErr) {
+        const code =
+          benchmarkErr &&
+          typeof benchmarkErr === 'object' &&
+          'code' in benchmarkErr
+            ? String((benchmarkErr as { code?: string }).code)
+            : null
         console.warn(
-          '[orientation] benchmark snapshot not synced across 4 engines — skip model logs (need OpenFace server)'
+          '[orientation] benchmark model logs skipped:',
+          code === 'P2022'
+            ? 'DB schema out of date — run: npm run db:catch-up-models'
+            : benchmarkErr
         )
-      } else if (persistResult.skippedDuplicate) {
-        console.log('[orientation] skipped duplicate benchmarkSnapshotId', persistResult.snapshotId)
       }
     }
 
@@ -277,6 +306,7 @@ export async function POST(request: NextRequest) {
         logsCreated: logsCreated,
         orientationLogsCreated: events.length,
         faceDetectionLossLogCreated: lossLogsCount,
+        benchmarkPersist,
         sessionStatistics: sessionStatistics,
         summary: {
           totalEvents: sessionStats.totalEvents,
