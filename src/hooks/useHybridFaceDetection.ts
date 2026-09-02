@@ -159,6 +159,104 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     }
   }, [])
 
+  /** Refresh benchmark panel — throttled on MP ticks, immediate after YOLO/Dlib/OpenFace inference. */
+  const publishBenchmarkMetrics = useCallback((options?: { force?: boolean }) => {
+    const now = Date.now()
+    if (
+      !options?.force &&
+      now - benchmarkLastPublishRef.current < BENCHMARK_UI_PUBLISH_MS
+    ) {
+      return
+    }
+    benchmarkLastPublishRef.current = now
+
+    const mpData = mediaPipeDataRef.current
+    const yRes = yoloMultiFaceDataRef.current
+    const dRes = dlibDataRef.current
+    const ofRes = openFaceDataRef.current
+
+    setBenchmarkMetrics(
+      buildMultiEngineBenchmark({
+        mpLatencyMs: mpLastLatencyMsRef.current,
+        mpIsDetected: mpData?.isDetected ?? false,
+        mpConfidence: mpData?.confidence || 0,
+        mpLandmarksCount: mpData?.landmarks?.length || 0,
+        yolo: yRes
+          ? {
+              isDetected: yRes.isDetected,
+              latencyMs: yRes.latencyMs,
+              confidence: yRes.confidence,
+              faceCount: yRes.faceCount,
+            }
+          : null,
+        dlib: dRes
+          ? {
+              isDetected: dRes.isDetected,
+              latencyMs: dRes.latencyMs,
+              confidence: dRes.confidence,
+              landmarksCount: dRes.landmarks68?.length || 0,
+            }
+          : null,
+        openface: ofRes
+          ? openFaceBenchmarkFromDetection({
+              isDetected: ofRes.isDetected,
+              confidence: ofRes.confidence,
+              clientRoundTripMs:
+                ofRes.clientRoundTripMs ?? ofRes.latencyMs ?? null,
+              serverLatencyMs: ofRes.serverLatencyMs ?? null,
+              resultTimestamp: ofRes.timestamp ?? null,
+              actionUnits: ofRes.actionUnits as Record<string, unknown> | null,
+            })
+          : null,
+        snapshotSynced: false,
+      })
+    )
+  }, [])
+
+  const backgroundEnginesPreloadedRef = useRef(false)
+  const preloadInFlightRef = useRef(false)
+
+  /** Warm YOLO/Dlib (and L2CS in research) before Start — no extra inference loops. */
+  const preloadBackgroundEngines = useCallback(async () => {
+    if (backgroundEnginesPreloadedRef.current || preloadInFlightRef.current) {
+      return true
+    }
+    preloadInFlightRef.current = true
+    try {
+      const tasks: Promise<unknown>[] = []
+
+      if (!yoloDetectorRef.current) {
+        yoloDetectorRef.current = new YOLOv8FaceDetector()
+        tasks.push(yoloDetectorRef.current.initialize())
+      }
+
+      if (
+        runtimeConfigRef.current.enableDlibBackgroundLoop &&
+        !dlibDetectorRef.current
+      ) {
+        dlibDetectorRef.current = new Dlib68PointDetector()
+        tasks.push(dlibDetectorRef.current.initialize())
+      }
+
+      if (
+        runtimeConfigRef.current.enableL2csInPrimaryLoop &&
+        !l2csDetectorRef.current
+      ) {
+        l2csDetectorRef.current = new L2CSGazeDetector()
+        tasks.push(l2csDetectorRef.current.initialize())
+      }
+
+      await Promise.all(tasks)
+      backgroundEnginesPreloadedRef.current = true
+      return true
+    } catch (err) {
+      console.warn('⚠️ Background engine preload failed (will retry on first scan):', err)
+      return false
+    } finally {
+      preloadInFlightRef.current = false
+    }
+  }, [])
+
   // Initialize all 4 detector engines
   const initializeHybridDetectors = useCallback(async () => {
     setIsInitializing(true)
@@ -230,49 +328,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
           }
         }
 
-        const yRes = yoloMultiFaceDataRef.current
-
-        if (now - benchmarkLastPublishRef.current >= BENCHMARK_UI_PUBLISH_MS) {
-          benchmarkLastPublishRef.current = now
-          const ofRes = openFaceDataRef.current
-          const dRes = dlibDataRef.current
-          setBenchmarkMetrics(
-            buildMultiEngineBenchmark({
-              mpLatencyMs: mpLatency,
-              mpIsDetected: data.isDetected,
-              mpConfidence: data.confidence || 0,
-              mpLandmarksCount: data.landmarks?.length || 0,
-              yolo: yRes
-                ? {
-                    isDetected: yRes.isDetected,
-                    latencyMs: yRes.latencyMs,
-                    confidence: yRes.confidence,
-                    faceCount: yRes.faceCount,
-                  }
-                : null,
-              dlib: dRes
-                ? {
-                    isDetected: dRes.isDetected,
-                    latencyMs: dRes.latencyMs,
-                    confidence: dRes.confidence,
-                    landmarksCount: dRes.landmarks68?.length || 0,
-                  }
-                : null,
-              openface: ofRes
-                ? openFaceBenchmarkFromDetection({
-                    isDetected: ofRes.isDetected,
-                    confidence: ofRes.confidence,
-                    clientRoundTripMs:
-                      ofRes.clientRoundTripMs ?? ofRes.latencyMs ?? null,
-                    serverLatencyMs: ofRes.serverLatencyMs ?? null,
-                    resultTimestamp: ofRes.timestamp ?? null,
-                    actionUnits: ofRes.actionUnits as Record<string, unknown> | null,
-                  })
-                : null,
-              snapshotSynced: false,
-            })
-          )
-        }
+        publishBenchmarkMetrics()
 
         // Check for MediaPipe's own multi-face count
         if (data.multipleFaces && data.multipleFaces.count > 1) {
@@ -315,7 +371,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     } finally {
       primaryInFlightRef.current = false
     }
-  }, [lookingAwayThresholdMs, addViolation, publishUiDetectionState])
+  }, [lookingAwayThresholdMs, addViolation, publishUiDetectionState, publishBenchmarkMetrics])
 
   /** L2CS ONNX — separate low-frequency loop (never blocks MediaPipe) */
   const performL2csScan = useCallback(async (video: HTMLVideoElement) => {
@@ -351,12 +407,13 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
       })
       l2csGazeDataRef.current = l2csRes
       setL2csGazeData(l2csRes)
+      publishBenchmarkMetrics({ force: true })
       return l2csRes
     } catch (err) {
       console.error('Error in L2CS gaze scan:', err)
       return null
     }
-  }, [])
+  }, [publishBenchmarkMetrics])
 
   /** Same-frame benchmark: MP + YOLO + Dlib on live video, OpenFace on captured JPEG — for DB comparison. */
   const captureSyncedBenchmark = useCallback(async (video: HTMLVideoElement) => {
@@ -512,12 +569,14 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
           severity: 'CRITICAL'
         })
       }
+
+      publishBenchmarkMetrics({ force: true })
     } catch (err) {
       console.error('Error in Background YOLOv8 multi-face scan:', err)
     } finally {
       yoloInFlightRef.current = false
     }
-  }, [addViolation, modelEventLogEnqueueRef])
+  }, [addViolation, modelEventLogEnqueueRef, publishBenchmarkMetrics])
 
   /** Dlib 68-point — background loop (face-api.js, does not block MediaPipe) */
   const performBackgroundDlibScan = useCallback(async (video: HTMLVideoElement) => {
@@ -551,6 +610,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
         }),
       })
 
+      publishBenchmarkMetrics({ force: true })
       return dRes
     } catch (err) {
       console.error('Error in Background Dlib scan:', err)
@@ -558,7 +618,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     } finally {
       dlibInFlightRef.current = false
     }
-  }, [modelEventLogEnqueueRef])
+  }, [modelEventLogEnqueueRef, publishBenchmarkMetrics])
 
   // 3. Background Loop: OpenFace 3.0 remote server (~800ms)
   const performOpenFaceRemoteScan = useCallback(async (video: HTMLVideoElement) => {
@@ -598,12 +658,13 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
         })
       }
 
+      publishBenchmarkMetrics({ force: true })
       return mapped
     } catch (err) {
       console.error('Error in OpenFace remote scan:', err)
       return null
     }
-  }, [modelEventLogEnqueueRef])
+  }, [modelEventLogEnqueueRef, publishBenchmarkMetrics])
 
   // Start Dual Hybrid Tracking Loops for 4 Concurrent Models
   const startHybridTracking = useCallback((videoRef: React.RefObject<HTMLVideoElement | null>) => {
@@ -827,6 +888,7 @@ export function useHybridFaceDetection(config: HybridDetectionConfig = {}) {
     simulateIntruder,
     setSimulateIntruder,
     initializeHybridDetectors,
+    preloadBackgroundEngines,
     startHybridTracking,
     stopHybridTracking,
     startRecording,

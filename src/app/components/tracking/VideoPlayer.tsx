@@ -24,7 +24,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
     return (
       <video
         ref={ref}
-        className="w-full h-auto rounded-lg bg-black"
+        className="absolute inset-0 w-full h-full object-cover bg-black"
         style={{ transform: 'scaleX(-1)' }}
         autoPlay
         muted

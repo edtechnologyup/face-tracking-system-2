@@ -160,19 +160,23 @@ export default function TrackingPage() {
         {/* ส่วนหัว */}
         <div className="bg-white shadow-sm border-b border-purple-100">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center py-4">
-              <div className="flex items-center space-x-4">
-                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-full flex items-center justify-center">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center py-3 sm:py-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 bg-gradient-to-br from-purple-500 to-purple-600 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                 </div>
-                <div>
-                  <h1 className="text-xl font-bold text-gray-800">Tracking System</h1>
-                  <p className="text-sm text-gray-600">ยินดีต้อนรับคุณ {user.firstName}</p>
+                <div className="min-w-0">
+                  <h1 className="text-lg sm:text-xl font-bold text-gray-800 truncate">Tracking System</h1>
+                  <p className="text-xs sm:text-sm text-gray-600 truncate">ยินดีต้อนรับคุณ {user.firstName}</p>
                 </div>
               </div>
-              <Button onClick={handleLogoutClick} variant="secondary">
+              <Button
+                onClick={handleLogoutClick}
+                variant="secondary"
+                className="w-full sm:w-auto shrink-0 text-sm min-h-[44px]"
+              >
                 ออกจากระบบ
               </Button>
             </div>
@@ -180,7 +184,7 @@ export default function TrackingPage() {
         </div>
 
         {/* เนื้อหาหลัก */}
-        <div className="max-w-6xl mx-auto p-3 sm:p-6">
+        <div className="max-w-6xl mx-auto p-3 sm:p-6 overflow-x-hidden">
           <div className="grid gap-4 sm:gap-6">
             {/* การ์ดติดตาม */}
             {!isTracking ? (

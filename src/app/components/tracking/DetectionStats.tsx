@@ -73,16 +73,16 @@ export function DetectionStats({ data, isActive }: DetectionStatsProps) {
   const primaryStatus = getPrimaryStatus()
 
   return (
-    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-4 mb-4">
+    <div className="bg-white p-3 sm:p-4 rounded-xl border border-gray-200 shadow-sm space-y-3 sm:space-y-4 mb-4">
       {/* Banner แสดงสถานะการตรวจจับปัจจุบันแบบเรียลไทม์ */}
-      <div className={`p-4 rounded-lg border-2 flex items-center justify-between transition-all ${primaryStatus.bgColor}`}>
-        <div>
-          <div className="text-base font-bold flex items-center gap-2">
-            <span>{primaryStatus.label}</span>
+      <div className={`p-3 sm:p-4 rounded-lg border-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 transition-all ${primaryStatus.bgColor}`}>
+        <div className="min-w-0">
+          <div className="text-sm sm:text-base font-bold">
+            <span className="break-words">{primaryStatus.label}</span>
           </div>
-          <p className="text-xs opacity-90 mt-0.5">{primaryStatus.subtext}</p>
+          <p className="text-xs opacity-90 mt-0.5 break-words">{primaryStatus.subtext}</p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${primaryStatus.badgeColor}`}>
+        <span className={`self-start shrink-0 px-3 py-1 rounded-full text-xs font-semibold ${primaryStatus.badgeColor}`}>
           LIVE STATUS
         </span>
       </div>
@@ -132,16 +132,16 @@ export function DetectionStats({ data, isActive }: DetectionStatsProps) {
 
       {/* Distance & Multiple Faces status */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-        <div className={`p-2.5 rounded-lg border text-xs flex justify-between items-center ${
+        <div className={`p-2.5 rounded-lg border text-xs flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 ${
           data.multipleFaces?.isSecurityRisk ? 'bg-red-50 text-red-800 border-red-200' : 'bg-blue-50 text-blue-800 border-blue-200'
         }`}>
           <span>สถานะจำนวนใบหน้าในกล้อง:</span>
-          <span className="font-bold">
+          <span className="font-bold break-words">
             {data.multipleFaces?.isSecurityRisk ? `🚨 พบ ${data.multipleFaces.count} ใบหน้า (เสี่ยงทุจริต)` : `🟢 ปกติ (${data.isDetected ? 1 : 0} ใบหน้า)`}
           </span>
         </div>
 
-        <div className={`p-2.5 rounded-lg border text-xs flex justify-between items-center ${
+        <div className={`p-2.5 rounded-lg border text-xs flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 ${
           data.distance?.isTooFar ? 'bg-orange-50 text-orange-800 border-orange-200' : 'bg-gray-50 text-gray-700 border-gray-200'
         }`}>
           <span>ระยะห่างกะประมาณ:</span>
