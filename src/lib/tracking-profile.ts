@@ -14,15 +14,21 @@ export interface DeviceTierSpec {
   yoloIntervalMs: number;
   syncedBenchmarkIntervalMs: number;
   enableL2csInPrimaryLoop: boolean;
+  /** Run Dlib/face-api in a separate low-frequency loop (not blocking MediaPipe) */
+  enableDlibBackgroundLoop: boolean;
+  /** @deprecated use enableDlibBackgroundLoop */
   enableDlibInPrimaryLoop: boolean;
+  dlibIntervalMs: number;
+  /** Min gap between L2CS ONNX runs in primary loop */
+  l2csIntervalMs: number;
   openFaceContinuousLoop: boolean;
   provenanceFullEveryN: number;
+  /** Periodic /api/tracking/snapshot-analytics (extra L2CS server-side) */
+  enableDeepAnalyticsSnapshots: boolean;
   /** Sci-Fi mesh density on canvas overlay */
   overlayMode: OverlayMode;
   /** YOLO/Dlib/OpenFace debug overlays on canvas */
   showEngineOverlays: boolean;
-  /** Pause detection loops when tab is hidden (Phase 3) */
-  pauseWhenHidden: boolean;
 }
 
 export interface TrackingRuntimeConfig extends DeviceTierSpec {
@@ -41,12 +47,15 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     yoloIntervalMs: 1200,
     syncedBenchmarkIntervalMs: 30_000,
     enableL2csInPrimaryLoop: true,
-    enableDlibInPrimaryLoop: true,
+    enableDlibBackgroundLoop: true,
+    enableDlibInPrimaryLoop: false,
+    dlibIntervalMs: 2000,
+    l2csIntervalMs: 300,
     openFaceContinuousLoop: false,
     provenanceFullEveryN: 60,
+    enableDeepAnalyticsSnapshots: false,
     overlayMode: 'full',
     showEngineOverlays: true,
-    pauseWhenHidden: true,
   },
   T1: {
     label: 'iPad (A12+)',
@@ -55,12 +64,15 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     yoloIntervalMs: 1500,
     syncedBenchmarkIntervalMs: 45_000,
     enableL2csInPrimaryLoop: true,
-    enableDlibInPrimaryLoop: true,
+    enableDlibBackgroundLoop: true,
+    enableDlibInPrimaryLoop: false,
+    dlibIntervalMs: 2000,
+    l2csIntervalMs: 400,
     openFaceContinuousLoop: false,
     provenanceFullEveryN: 60,
+    enableDeepAnalyticsSnapshots: false,
     overlayMode: 'full',
     showEngineOverlays: true,
-    pauseWhenHidden: true,
   },
   T2: {
     label: 'Older iPad / mid Android',
@@ -69,12 +81,15 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     yoloIntervalMs: 2000,
     syncedBenchmarkIntervalMs: 60_000,
     enableL2csInPrimaryLoop: false,
+    enableDlibBackgroundLoop: true,
     enableDlibInPrimaryLoop: false,
+    dlibIntervalMs: 3000,
+    l2csIntervalMs: 500,
     openFaceContinuousLoop: false,
     provenanceFullEveryN: 30,
+    enableDeepAnalyticsSnapshots: false,
     overlayMode: 'contours',
-    showEngineOverlays: false,
-    pauseWhenHidden: true,
+    showEngineOverlays: true,
   },
   T3: {
     label: 'iPhone / small mobile',
@@ -83,12 +98,14 @@ const TIER_SPECS: Record<DeviceTier, DeviceTierSpec> = {
     yoloIntervalMs: 2500,
     syncedBenchmarkIntervalMs: 90_000,
     enableL2csInPrimaryLoop: false,
+    enableDlibBackgroundLoop: true,
     enableDlibInPrimaryLoop: false,
+    dlibIntervalMs: 4000,
     openFaceContinuousLoop: false,
     provenanceFullEveryN: 30,
-    overlayMode: 'minimal',
-    showEngineOverlays: false,
-    pauseWhenHidden: true,
+    enableDeepAnalyticsSnapshots: false,
+    overlayMode: 'contours',
+    showEngineOverlays: true,
   },
 };
 
@@ -187,13 +204,24 @@ export function buildTrackingRuntimeConfig(input?: {
     tier === 'T0' &&
     spec.openFaceContinuousLoop;
 
+  const overlayMode =
+    profile === 'exam' && spec.overlayMode === 'full' ? 'contours' : spec.overlayMode;
+  const enableL2csInPrimaryLoop =
+    profile === 'exam' ? false : spec.enableL2csInPrimaryLoop;
+  const yoloIntervalMs =
+    profile === 'exam' ? Math.max(spec.yoloIntervalMs, 3000) : spec.yoloIntervalMs;
+
   return {
     profile,
     tier,
     userAgent,
     deviceMemoryGb,
     ...spec,
+    overlayMode,
+    enableL2csInPrimaryLoop,
+    yoloIntervalMs,
     openFaceContinuousLoop,
+    enableDeepAnalyticsSnapshots: profile === 'research',
     sampleRateHz: Math.round(1000 / spec.sampleIntervalMs),
   };
 }

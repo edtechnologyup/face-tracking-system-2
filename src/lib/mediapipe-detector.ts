@@ -188,10 +188,25 @@ export class OneEuroFilter {
   }
 }
 
+export type MediaPipePerformanceMode = 'full' | 'exam';
+
+export interface MediaPipeDetectorOptions {
+  /** exam = lighter inference (no blendshapes/matrix, fewer faces) */
+  performanceMode?: MediaPipePerformanceMode;
+}
+
 export class MediaPipeDetector {
   private faceLandmarker: FaceLandmarker | null = null;
   private isInitialized: boolean = false;
   private lastDetection: FaceTrackingData | null = null;
+  private performanceMode: MediaPipePerformanceMode;
+  private lastBrightnessCheckMs = 0;
+  private cachedBrightness = 0.5;
+  private readonly BRIGHTNESS_CHECK_INTERVAL_MS = 2000;
+
+  constructor(options?: MediaPipeDetectorOptions) {
+    this.performanceMode = options?.performanceMode ?? 'full';
+  }
   
   // Robust Outlier-Resistant Calibration System
   private calibrationPitchSamples: number[] = [];
@@ -255,16 +270,17 @@ export class MediaPipeDetector {
       );
       console.log('✅ FilesetResolver โหลดสำเร็จ');
 
+      const isExam = this.performanceMode === 'exam';
       // ใช้ GPU เพื่อลดความล่าช้า (Lag) ตอนเริ่มต้นและระหว่างจับใบหน้า
       this.faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
         baseOptions: {
           modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
           delegate: "GPU"
         },
-        outputFaceBlendshapes: true,
-        outputFacialTransformationMatrixes: true,
+        outputFaceBlendshapes: !isExam,
+        outputFacialTransformationMatrixes: !isExam,
         runningMode: "VIDEO",
-        numFaces: 3 // เพิ่มเป็น 3 เพื่อตรวจสอบหลายใบหน้า
+        numFaces: isExam ? 2 : 3
       });
 
       this.isInitialized = true;
@@ -288,15 +304,16 @@ export class MediaPipeDetector {
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
       );
 
+      const isExam = this.performanceMode === 'exam';
       this.faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
         baseOptions: {
           modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
           delegate: "CPU"
         },
-        outputFaceBlendshapes: true,
-        outputFacialTransformationMatrixes: true,
+        outputFaceBlendshapes: !isExam,
+        outputFacialTransformationMatrixes: !isExam,
         runningMode: "VIDEO",
-        numFaces: 3
+        numFaces: isExam ? 2 : 3
       });
 
       this.isInitialized = true;
@@ -345,15 +362,13 @@ export class MediaPipeDetector {
       const results = this.faceLandmarker.detectForVideo(video, performance.now());
       
       if (!results.faceLandmarks || results.faceLandmarks.length === 0) {
-        console.log('❌ ไม่พบใบหน้าใน MediaPipe results');
-        
         // ล้างตำแหน่งใบหน้าที่ล็อคไว้
         this.lastTrackedFaceCenter = null;
         
         // บันทึก face detection loss
         this.handleFaceDetectionLoss();
         
-        const brightnessMean = this.calculateBrightness(video);
+        const brightnessMean = this.getBrightness(video);
         const isLowBrightness = brightnessMean < this.BRIGHTNESS_MIN_THRESHOLD;
 
         // หากก่อนหน้านี้กำลังก้มหน้าอยู่ (DOWN) แล้วแลนด์มาร์คหลุดชั่วคราวจากการก้มลึก ให้คงสถานะ DOWN ไว้ช่วงสั้นๆ (กรอบ 1-10)
@@ -521,7 +536,7 @@ export class MediaPipeDetector {
       trackingData.allFaceLandmarks = results.faceLandmarks;
       
       // CBMI Guide Validity Checks: Brightness, Distance, Multiple Faces
-      const brightnessMean = this.calculateBrightness(video);
+      const brightnessMean = this.getBrightness(video);
       const isLowBrightness = brightnessMean < this.BRIGHTNESS_MIN_THRESHOLD;
       const isTooFar = !!trackingData.distance?.isTooFar;
       const hasMultipleFaces = !!multipleFacesData.isSecurityRisk;
@@ -569,6 +584,17 @@ export class MediaPipeDetector {
     this.yawFilter.reset();
     this.pitchFilter.reset();
     console.log('🔄 Re-calibrating face neutral baseline position...');
+  }
+
+  /** Throttled brightness — avoids canvas read every detection frame */
+  private getBrightness(video: HTMLVideoElement): number {
+    const now = performance.now();
+    if (now - this.lastBrightnessCheckMs < this.BRIGHTNESS_CHECK_INTERVAL_MS) {
+      return this.cachedBrightness;
+    }
+    this.lastBrightnessCheckMs = now;
+    this.cachedBrightness = this.calculateBrightness(video);
+    return this.cachedBrightness;
   }
 
   /**

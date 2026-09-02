@@ -66,6 +66,11 @@ describe('buildTrackingRuntimeConfig', () => {
     });
     expect(cfg.openFaceContinuousLoop).toBe(false);
     expect(cfg.sampleRateHz).toBe(2);
+    expect(cfg.overlayMode).toBe('contours');
+    expect(cfg.showEngineOverlays).toBe(true);
+    expect(cfg.enableDeepAnalyticsSnapshots).toBe(false);
+    expect(cfg.enableDlibBackgroundLoop).toBe(true);
+    expect(cfg.dlibIntervalMs).toBe(2000);
   });
 
   it('uses 1 Hz sampling on T3', () => {
@@ -77,8 +82,8 @@ describe('buildTrackingRuntimeConfig', () => {
     expect(cfg.sampleIntervalMs).toBe(1000);
     expect(cfg.sampleRateHz).toBe(1);
     expect(cfg.enableL2csInPrimaryLoop).toBe(false);
-    expect(cfg.overlayMode).toBe('minimal');
-    expect(cfg.showEngineOverlays).toBe(false);
+    expect(cfg.overlayMode).toBe('contours');
+    expect(cfg.showEngineOverlays).toBe(true);
   });
 
   it('marks research eligibility', () => {

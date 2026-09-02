@@ -109,7 +109,8 @@ export function drawConnectedLines(
   indices: number[],
   coordinates: DrawingCoordinates,
   color: string,
-  lineWidth: number
+  lineWidth: number,
+  useGlow = true
 ) {
   if (indices.length < 2) return
 
@@ -117,8 +118,10 @@ export function drawConnectedLines(
     ctx.save()
     ctx.strokeStyle = color
     ctx.lineWidth = lineWidth
-    ctx.shadowColor = color
-    ctx.shadowBlur = 3
+    if (useGlow) {
+      ctx.shadowColor = color
+      ctx.shadowBlur = 3
+    }
     ctx.globalCompositeOperation = 'screen'
 
     ctx.beginPath()
@@ -180,9 +183,10 @@ export function drawFaceContours(
   ctx: CanvasRenderingContext2D,
   landmarks: Landmark[],
   coordinates: DrawingCoordinates,
-  color: string
+  color: string,
+  useGlow = true
 ) {
-  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.faceOval, coordinates, color, 1)
+  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.faceOval, coordinates, color, 1, useGlow)
 }
 
 // วาดตา
@@ -190,10 +194,11 @@ export function drawEyeContours(
   ctx: CanvasRenderingContext2D,
   landmarks: Landmark[],
   coordinates: DrawingCoordinates,
-  color: string
+  color: string,
+  useGlow = true
 ) {
-  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.leftEye, coordinates, color, 1.5)
-  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.rightEye, coordinates, color, 1.5)
+  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.leftEye, coordinates, color, 1.5, useGlow)
+  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.rightEye, coordinates, color, 1.5, useGlow)
 }
 
 // วาดปาก
@@ -201,10 +206,11 @@ export function drawMouthContours(
   ctx: CanvasRenderingContext2D,
   landmarks: Landmark[],
   coordinates: DrawingCoordinates,
-  color: string
+  color: string,
+  useGlow = true
 ) {
-  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.outerLips, coordinates, color, 1.5)
-  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.innerLips, coordinates, color, 1)
+  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.outerLips, coordinates, color, 1.5, useGlow)
+  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.innerLips, coordinates, color, 1, useGlow)
 }
 
 // วาดจมูก
@@ -212,10 +218,11 @@ export function drawNoseContours(
   ctx: CanvasRenderingContext2D,
   landmarks: Landmark[],
   coordinates: DrawingCoordinates,
-  color: string
+  color: string,
+  useGlow = true
 ) {
-  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.noseBridge, coordinates, color, 1.5)
-  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.noseWings, coordinates, color, 1)
+  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.noseBridge, coordinates, color, 1.5, useGlow)
+  drawConnectedLines(ctx, landmarks, FACE_CONTOURS.noseWings, coordinates, color, 1, useGlow)
 }
 
 // วาดสถานะข้อมูล
@@ -274,17 +281,18 @@ export function drawSciFiFaceMesh(
   try {
     const coordinates = calculateCoordinates(video, canvasWidth, canvasHeight)
     const colors = getDrawingColors(isLookingAway)
+    const useGlow = overlayMode === 'full'
     
     if (overlayMode === 'full') {
       drawLandmarkPoints(ctx, landmarks, coordinates, colors.primary)
     }
     
-    drawFaceContours(ctx, landmarks, coordinates, colors.primary)
-    drawEyeContours(ctx, landmarks, coordinates, colors.primary)
+    drawFaceContours(ctx, landmarks, coordinates, colors.primary, useGlow)
+    drawEyeContours(ctx, landmarks, coordinates, colors.primary, useGlow)
 
     if (overlayMode === 'full') {
-      drawMouthContours(ctx, landmarks, coordinates, colors.primary)
-      drawNoseContours(ctx, landmarks, coordinates, colors.primary)
+      drawMouthContours(ctx, landmarks, coordinates, colors.primary, useGlow)
+      drawNoseContours(ctx, landmarks, coordinates, colors.primary, useGlow)
     }
     
   } catch (error) {
