@@ -60,17 +60,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No logs provided' }, { status: 400 });
     }
 
-    const session = await prisma.trackingSession.findUnique({
-      where: { id: sessionId },
-      select: { id: true },
-    });
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Tracking session not found', code: 'SESSION_NOT_FOUND' },
-        { status: 404 }
-      );
-    }
-
     const entries = logs
       .slice(0, MAX_BATCH_SIZE)
       .map(parseEntry)
@@ -80,6 +69,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No valid model log entries' }, { status: 400 });
     }
 
+    // Skip findUnique — FK on createMany rejects unknown sessionId (saves a pool checkout)
     const result = await persistModelEventLogs(sessionId, entries);
 
     return NextResponse.json({
@@ -88,6 +78,16 @@ export async function POST(request: NextRequest) {
       byEngine: result.byEngine,
     });
   } catch (error: unknown) {
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: string }).code)
+        : null;
+    if (code === 'P2003') {
+      return NextResponse.json(
+        { error: 'Tracking session not found', code: 'SESSION_NOT_FOUND' },
+        { status: 404 }
+      );
+    }
     console.error('Error saving model event logs:', error);
     return NextResponse.json({ error: 'Failed to save model logs' }, { status: 500 });
   }

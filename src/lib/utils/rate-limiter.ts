@@ -117,6 +117,7 @@ export const RATE_LIMITS = {
   orientation: { maxTokens: 24, refillRate: 2, redisMaxRequests: 48 },
   snapshotAnalytics: { maxTokens: 20, refillRate: 2, redisMaxRequests: 40 },
   openfaceAnalyze: { maxTokens: 15, refillRate: 0.5, redisMaxRequests: 30 },
-  modelLogs: { maxTokens: 40, refillRate: 4, redisMaxRequests: 80 },
+  /** ~6 req/min/session — pairs with 10s client flush */
+  modelLogs: { maxTokens: 12, refillRate: 1, redisMaxRequests: 24 },
   login: { maxTokens: 5, refillRate: 0.1, redisMaxRequests: 10 },
 } as const;

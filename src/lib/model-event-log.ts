@@ -69,24 +69,25 @@ export async function persistModelEventLogs(
 
   const byEngine: Partial<Record<ModelEventEngine, number>> = {};
 
-  await prisma.$transaction(async (tx) => {
-    if (mpRows.length) {
-      const r = await tx.mediaPipeLog.createMany({ data: mpRows });
-      byEngine.mediapipe = r.count;
-    }
-    if (yoloRows.length) {
-      const r = await tx.yolov8Log.createMany({ data: yoloRows });
-      byEngine.yolov8 = r.count;
-    }
-    if (dlibRows.length) {
-      const r = await tx.dlibLog.createMany({ data: dlibRows });
-      byEngine.dlib = r.count;
-    }
-    if (openfaceRows.length) {
-      const r = await tx.openFaceLog.createMany({ data: openfaceRows });
-      byEngine.openface = r.count;
-    }
-  });
+  // Avoid interactive $transaction — it holds a pooled connection for the whole
+  // batch and causes P2028 / pool timeouts under concurrent exam sessions.
+  // Event logs are append-only; partial writes are acceptable and retried by client.
+  if (mpRows.length) {
+    const r = await prisma.mediaPipeLog.createMany({ data: mpRows });
+    byEngine.mediapipe = r.count;
+  }
+  if (yoloRows.length) {
+    const r = await prisma.yolov8Log.createMany({ data: yoloRows });
+    byEngine.yolov8 = r.count;
+  }
+  if (dlibRows.length) {
+    const r = await prisma.dlibLog.createMany({ data: dlibRows });
+    byEngine.dlib = r.count;
+  }
+  if (openfaceRows.length) {
+    const r = await prisma.openFaceLog.createMany({ data: openfaceRows });
+    byEngine.openface = r.count;
+  }
 
   const written = Object.values(byEngine).reduce((a, b) => a + (b ?? 0), 0);
   return { written, byEngine };

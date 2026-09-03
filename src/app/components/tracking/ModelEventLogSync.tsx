@@ -7,10 +7,11 @@ import {
 } from '@/lib/engine-benchmark';
 import type { ModelEventEngine, ModelEventLogEntry, ModelEventLogEnqueue } from '@/lib/model-event-log';
 
-export const MEDIAPIPE_MODEL_LOG_INTERVAL_MS = 1000;
-const MODEL_LOG_BATCH_SIZE = 12;
-const MODEL_LOG_FLUSH_MS = 5000;
-const RETRY_BUFFER_MAX = 120;
+/** Sample MediaPipe metrics less often under multi-user load (was 1s → pool storms). */
+export const MEDIAPIPE_MODEL_LOG_INTERVAL_MS = 3000;
+const MODEL_LOG_BATCH_SIZE = 20;
+const MODEL_LOG_FLUSH_MS = 10000;
+const RETRY_BUFFER_MAX = 80;
 
 export interface ModelEventLogSyncProps {
   isActive: boolean;
