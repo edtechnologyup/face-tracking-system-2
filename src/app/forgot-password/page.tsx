@@ -6,6 +6,7 @@ import { Input } from '@/app/components/ui/Input'
 import { Button } from '@/app/components/ui/Button'
 import { validatePassword } from '@/lib/utils/validation'
 import { FaceReset } from '@/app/components/auth/FaceReset'
+import { isFaceAuthEnabled } from '@/lib/face-auth-flag'
 import toast from 'react-hot-toast'
 
 export default function ForgotPasswordPage() {
@@ -48,10 +49,16 @@ export default function ForgotPasswordPage() {
       const result = await response.json()
 
       if (response.ok && result.success) {
-        setVerificationToken(result.verificationToken)
         setUserFirstName(result.firstName || '')
-        setShowFaceModal(true)
-        toast.success(`พบข้อมูลบัญชีของ ${result.firstName || ''} กรุณายืนยันใบหน้า`)
+
+        if (result.resetToken && !result.requiresFaceVerification) {
+          setResetToken(result.resetToken)
+          toast.success(`พบข้อมูลบัญชีของ ${result.firstName || ''} กรุณาตั้งรหัสผ่านใหม่`)
+        } else {
+          setVerificationToken(result.verificationToken)
+          setShowFaceModal(true)
+          toast.success(`พบข้อมูลบัญชีของ ${result.firstName || ''} กรุณายืนยันใบหน้า`)
+        }
       } else {
         setError(result.error || 'เกิดข้อผิดพลาดในการตรวจสอบบัญชี')
         toast.error(result.error || 'เกิดข้อผิดพลาดในการตรวจสอบบัญชี')
@@ -198,7 +205,9 @@ export default function ForgotPasswordPage() {
               <div className="text-center mb-8">
                 <h2 className="text-3xl font-bold text-gray-900 tracking-tight">รีเซ็ตรหัสผ่าน</h2>
                 <p className="mt-2 text-sm text-gray-600">
-                  ยืนยันตัวตนด้วยใบหน้าเพื่อขอเปลี่ยนรหัสผ่านใหม่
+                  {isFaceAuthEnabled()
+                    ? 'ยืนยันตัวตนด้วยใบหน้าเพื่อขอเปลี่ยนรหัสผ่านใหม่'
+                    : 'กรอกอีเมลหรือรหัสนิสิตเพื่อตั้งรหัสผ่านใหม่'}
                 </p>
               </div>
 
@@ -223,7 +232,11 @@ export default function ForgotPasswordPage() {
                   disabled={loading}
                   className="w-full justify-center flex py-3 bg-purple-600 hover:bg-purple-700 text-white font-medium"
                 >
-                  {loading ? 'กำลังตรวจสอบ...' : 'ยืนยันใบหน้าเพื่อเปลี่ยนรหัสผ่าน'}
+                  {loading
+                    ? 'กำลังตรวจสอบ...'
+                    : isFaceAuthEnabled()
+                      ? 'ยืนยันใบหน้าเพื่อเปลี่ยนรหัสผ่าน'
+                      : 'ดำเนินการต่อ'}
                 </Button>
               </form>
 

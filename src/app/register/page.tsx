@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { AuthForm } from '@/app/components/auth/AuthForm'
 import { FaceCapture } from '@/app/components/auth/FaceCapture'
+import { isFaceAuthEnabled } from '@/lib/face-auth-flag'
 import toast from 'react-hot-toast'
 
 export default function RegisterPage() {
@@ -50,25 +51,30 @@ export default function RegisterPage() {
       console.log('Response data:', result)
 
       if (response.ok) {
-        // สำเร็จ - บันทึกข้อมูลผู้ใช้และไปหน้าลงทะเบียนใบหน้า
-        if (result.user) {
-          setUserData(result.user)
-          localStorage.setItem('tempUserId', result.user.id)
-          localStorage.setItem('tempUser', JSON.stringify(result.user))
-          // เก็บ registrationToken สำหรับลงทะเบียนใบหน้า
-          if (result.registrationToken) {
-            localStorage.setItem('registrationToken', result.registrationToken)
+        if (!isFaceAuthEnabled()) {
+          toast.success('สมัครสมาชิกสำเร็จ กรุณาเข้าสู่ระบบ')
+          setTimeout(() => {
+            window.location.href = '/login'
+          }, 1500)
+        } else {
+          // สำเร็จ - บันทึกข้อมูลผู้ใช้และไปหน้าลงทะเบียนใบหน้า
+          if (result.user) {
+            setUserData(result.user)
+            localStorage.setItem('tempUserId', result.user.id)
+            localStorage.setItem('tempUser', JSON.stringify(result.user))
+            // เก็บ registrationToken สำหรับลงทะเบียนใบหน้า
+            if (result.registrationToken) {
+              localStorage.setItem('registrationToken', result.registrationToken)
+            }
           }
+
+          toast.success('สมัครสมาชิกสำเร็จ กรุณาลงทะเบียนใบหน้าเพื่อเพิ่มความปลอดภัย')
+
+          setTimeout(() => {
+            setShowInstructions(true)
+            setShowFaceCapture(true)
+          }, 2000)
         }
-        
-        toast.success('สมัครสมาชิกสำเร็จ กรุณาลงทะเบียนใบหน้าเพื่อเพิ่มความปลอดภัย')
-        
-        // แสดงคำแนะนำและหน้าลงทะเบียนใบหน้าหลังจาก 2 วินาที
-        setTimeout(() => {
-          setShowInstructions(true)
-          setShowFaceCapture(true)
-        }, 2000)
-        
       } else {
         // มีข้อผิดพลาด
         toast.error(result.error || 'เกิดข้อผิดพลาด')

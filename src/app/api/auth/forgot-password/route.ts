@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { validateEmail } from '@/lib/utils/validation';
 import jwt from 'jsonwebtoken';
+import { isFaceAuthEnabled } from '@/lib/face-auth-flag';
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,6 +48,21 @@ export async function POST(request: NextRequest) {
         { error: 'ไม่พบบัญชีผู้ใช้ในระบบ กรุณาตรวจสอบอีเมลหรือรหัสนิสิตอีกครั้ง' },
         { status: 404 }
       );
+    }
+
+    if (!isFaceAuthEnabled()) {
+      const resetToken = jwt.sign(
+        { userId: user.id, email: user.email, purpose: 'password-reset' },
+        JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+
+      return NextResponse.json({
+        success: true,
+        requiresFaceVerification: false,
+        resetToken,
+        firstName: user.firstName
+      });
     }
 
     if (!user.faceData) {

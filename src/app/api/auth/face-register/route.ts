@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import jwt from 'jsonwebtoken'
+import { FACE_AUTH_DISABLED_MESSAGE, isFaceAuthEnabled } from '@/lib/face-auth-flag'
 
 export async function POST(request: NextRequest) {
+  if (!isFaceAuthEnabled()) {
+    return NextResponse.json(
+      { error: FACE_AUTH_DISABLED_MESSAGE, faceAuthEnabled: false },
+      { status: 503 }
+    )
+  }
+
   try {
     // ตรวจสอบ JWT_SECRET
     const JWT_SECRET = process.env.JWT_SECRET

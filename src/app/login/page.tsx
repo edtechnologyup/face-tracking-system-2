@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { AuthForm } from '@/app/components/auth/AuthForm'
 import { FaceLogin } from '@/app/components/auth/FaceLogin'
+import { isFaceAuthEnabled } from '@/lib/face-auth-flag'
 import toast from 'react-hot-toast'
 
 export default function LoginPage() {
@@ -38,16 +39,21 @@ export default function LoginPage() {
       const result = await response.json()
 
       if (response.ok) {
-        // ตรวจสอบว่าเป็น admin หรือไม่
-        if (result.user.role === 'ADMIN') {
-          // แอดมินไม่ต้องยืนยันใบหน้า เข้าสู่ระบบได้เลย
+        const skipFaceAuth = result.user.role === 'ADMIN' || !isFaceAuthEnabled()
+
+        if (skipFaceAuth) {
           localStorage.setItem('user', JSON.stringify(result.user))
           localStorage.setItem('token', result.token)
-          
-          toast.success(`ยินดีต้อนรับคุณ ${result.user.firstName} (ผู้ดูแลระบบ)`)
-          
+
+          const isAdmin = result.user.role === 'ADMIN'
+          toast.success(
+            isAdmin
+              ? `ยินดีต้อนรับคุณ ${result.user.firstName} (ผู้ดูแลระบบ)`
+              : `ยินดีต้อนรับคุณ ${result.user.firstName}`
+          )
+
           setTimeout(() => {
-            window.location.href = '/admin'
+            window.location.href = isAdmin ? '/admin' : '/tracking'
           }, 1500)
         } else {
           // ผู้ใช้ทั่วไป - ต้องยืนยันตัวตนด้วยใบหน้า
@@ -123,11 +129,13 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <FaceLogin
-        isOpen={showFaceVerification}
-        onSuccess={handleFaceVerificationSuccess}
-        onCancel={handleFaceVerificationCancel}
-      />
+      {isFaceAuthEnabled() && (
+        <FaceLogin
+          isOpen={showFaceVerification}
+          onSuccess={handleFaceVerificationSuccess}
+          onCancel={handleFaceVerificationCancel}
+        />
+      )}
     </>
   )
 }
